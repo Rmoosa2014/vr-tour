@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>360° Virtual Tour</title>
+    <link rel="stylesheet" href="https://cdn.pannellum.org/2.5/pannellum.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdn.pannellum.org/2.5/pannellum.js"></script>
+    <style>
+        /* Basic page setup */
+        body, html {
+            margin: 0; padding: 0; height: 100%; overflow: hidden;
+            font-family: Arial, sans-serif; user-select: none; -webkit-user-select: none;
+            -moz-user-select: none; -ms-user-select: none;
+        }
+        #panorama { position: absolute; top: 0; left: 0; width: 100%; height: 100vh; }
+        #loading { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; justify-content: center; align-items: center; color: white; font-size: 24px; z-index: 1000; }
+        .logo-img { position: fixed; width: 50px; height: auto; z-index: 1000; transition: right 0.3s ease; }
+        .logo-tr { top: 20px; right: 20px; }
+        .slide-bar { position: fixed; bottom: -145px; left: 0; right: 0; height: 160px; background: rgba(0,0,0,0.5); display: flex; flex-direction: column; overflow: hidden; z-index: 1000; transition: bottom 0.3s ease, left 0.3s ease, width 0.3s ease; border-top: 2px solid rgba(255,255,255,0); box-shadow: 0 -5px 15px rgba(0,0,0,0.5); }
+        .slide-bar.visible { bottom: 0; }
+        .slide-bar.docked { left: 300px; width: calc(100% - 300px); right: auto; }
+        .slide-bar-content { display: flex; flex-direction: column; flex-grow: 1; padding: 5px 15px; position: relative; }
+        .category-name { color: white; font-size: 16px; padding: 5px 0; margin-bottom: 5px; font-weight: bold; text-align: left; position: relative; }
+        .thumbnail-container { display: flex; overflow-x: auto; scroll-behavior: smooth; flex-grow: 1; align-items: center; -ms-overflow-style: none; scrollbar-width: none; padding-bottom: 5px; }
+        .thumbnail-container::-webkit-scrollbar { display: none; }
+        .thumbnail { position: relative; height: 90px; width: 120px; margin-right: 10px; cursor: pointer; border: 3px solid transparent; transition: all 0.3s ease; flex-shrink: 0; overflow: hidden; border-radius: 5px; background: rgba(255,255,255,0.1); }
+        .thumbnail img { width: 100%; height: 100%; object-fit: cover; object-position: center; transition: transform 0.3s ease; }
+        .thumbnail.active { border: 3px solid #fff; box-shadow: 0 5px 15px rgba(0,0,0,0.5); transform: translateY(-5px); }
+        .thumbnail:hover { border: 3px solid rgba(255,255,255,0.7); transform: translateY(-5px); }
+        .thumbnail:hover img { transform: scale(1.05); }
+        .thumbnail-name { position: absolute; bottom: 0; left: 0; right: 0; color: white; font-size: 12px; padding: 5px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.7); }
+        .scroll-indicator { position: relative; height: 3px; background: rgba(255,255,255,0.2); width: 100%; margin-top: 5px; margin-bottom: 20px; cursor: pointer; }
+        .scroll-progress { height: 200%; background: #4CAF50; transition: width 0.1s; border-radius: 5px; width: 3%; }
+        .control-bar { position: fixed; bottom: 20px; left: 10px; display: flex; align-items: center; z-index: 1000; transition: bottom 0.3s ease, left 0.3s ease; }
+        .control-bar.slide-up { bottom: 170px; }
+        .control-bar.docked { left: calc(10px + 300px); }
+        .slide-arrow { width: 30px; height: 20px; background: rgba(0,0,0,0.7); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.3s; position: relative; }
+        .slide-arrow::after { content: "▲"; color: white; font-size: 12px; }
+        .slide-arrow:hover::before { content: "Expand"; position: absolute; bottom: 25px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.9); color: white; padding: 5px 10px; border-radius: 5px; font-size: 12px; white-space: nowrap; z-index: 1001; }
+        .slide-arrow.down::after { content: "▼"; }
+        .slide-arrow.down:hover::before { content: "Hide"; }
+        .category-icon { width: 30px; height: 20px; background: rgba(0,0,0,0.7); cursor: pointer; display: flex; align-items: center; justify-content: center; margin-left: 5px; transition: all 0.3s; position: relative; }
+        .category-icon::after { content: "≡"; color: white; font-size: 16px; }
+        .category-icon:hover::before { content: "Select Floor"; position: absolute; bottom: 25px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.9); color: white; padding: 5px 10px; border-radius: 5px; font-size: 12px; white-space: nowrap; }
+        .fullscreen-btn { width: 30px; height: 20px; background: rgba(0,0,0,0.7); cursor: pointer; display: flex; align-items: center; justify-content: center; margin-left: 5px; transition: all 0.3s; position: relative; }
+        .fullscreen-btn::after { content: "⛶"; color: white; font-size: 14px; }
+        .fullscreen-btn.active::after { content: "🛗"; }
+        .fullscreen-btn:hover::before { content: "Toggle Fullscreen"; position: absolute; bottom: 25px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.9); color: white; padding: 5px 10px; border-radius: 5px; font-size: 12px; white-space: nowrap; }
+        .category-list { position: absolute; bottom: 25px; left: 0; background: rgba(0,0,0,0.9); border-radius: 5px 5px 0 0; overflow: hidden; width: 110px; max-height: 0; transition: max-height 0.3s ease; box-shadow: 0 -5px 15px rgba(0,0,0,0.5); z-index: 1000; display: flex; flex-direction: column; }
+        .category-list.visible { max-height: 200px; display: flex; }
+        .category-item { padding: 8px 12px; color: white; cursor: pointer; font-size: 14px; transition: all 0.3s; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        .category-item:last-child { border-bottom: none; }
+        .category-item:hover { background: rgba(255,255,255,0.2); }
+        .category-item.active { background: rgba(255,255,255,0.9); color: black; }
+        .slide-counter { position: absolute; top: 5px; right: 15px; width: 60px; height: 20px; background: rgba(0,0,0,0.7); color: white; display: flex; align-items: center; justify-content: center; font-size: 12px; border-radius: 3px; z-index: 1001; }
+        .pnlm-container:-webkit-full-screen { z-index: 0 !important; }
+        .pnlm-container:fullscreen { z-index: 0 !important; }
+        .pnlm-title-box { display: none !important; }
+        .audio-btn { height: 20px; background: rgba(0,0,0,0.7); cursor: pointer; display: flex; align-items: center; justify-content: center; margin-left: 5px; transition: all 0.3s; position: relative; z-index: 1001; }
+        .audio-btn.play { width: 30px; background: linear-gradient(135deg, rgba(0,0,0,0.7), rgba(50,50,50,0.9)); border-radius: 4px; }
+        .audio-btn.bgm-toggle, .audio-btn.vc-toggle { width: 70px; background: linear-gradient(135deg, rgba(0,0,0,0.7), rgba(50,50,50,0.9)); border-radius: 4px; font-size: 12px; font-family: 'Arial Narrow', Arial, sans-serif; padding: 0 5px; }
+        .audio-btn::after { color: white; font-size: 14px; white-space: nowrap; }
+        .audio-btn.play::after { content: "▶"; }
+        .audio-btn.play.paused::after { content: "⏸"; }
+        .audio-btn.bgm-toggle::after { content: "♪ BGM: OFF"; }
+        .audio-btn.bgm-toggle.active::after { content: "♪ BGM: ON"; }
+        .audio-btn.vc-toggle::after { content: "🎙 VC: OFF"; }
+        .audio-btn.vc-toggle.active::after { content: "🎙 VC: ON"; }
+        .audio-btn:hover { transform: scale(1.05); background: linear-gradient(135deg, rgba(50,50,50,0.9), rgba(100,100,100,0.9)); }
+        .audio-btn:hover::before { content: ""; position: absolute; bottom: 25px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.9); color: white; padding: 5px 10px; border-radius: 5px; font-size: 12px; white-space: nowrap; z-index: 1002; }
+        .audio-btn.play:hover::before { content: "Play/Pause Audio"; }
+        .audio-btn.bgm-toggle:hover::before { content: "Toggle Background Music"; }
+        .audio-btn.vc-toggle:hover::before { content: "Toggle Voice Commentary"; }
+        .vc-actor-container { position: fixed; bottom: 20px; right: 20px; visibility: hidden; opacity: 0; padding: 10px; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 5px; background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.08); z-index: 1001; transition: bottom 0.3s ease, opacity 0.5s ease, transform 0.5s ease, height 0.2s ease, right 0.3s ease, visibility 0s linear 0s; width: 100px; height: 133.33px; max-width: 100px; max-height: 150px; overflow: hidden; transform: scale(0.8); cursor: move; display: flex; flex-direction: column; }
+        .vc-actor-container.visible { visibility: visible; opacity: 1; transform: scale(1); transition-delay: 0s; }
+        .vc-actor-container img { width: 100%; height: calc(100% - 15px); object-fit: contain; border-radius: 5px; display: block; }
+        .vc-actor-container.minimized img { display: none; }
+        .vc-toggle-arrow { width: 100%; height: 15px; background: none; cursor: pointer; display: flex; align-items: center; justify-content: center; border-top: 1px solid rgba(0,0,0,0.1); position: relative; }
+        .vc-toggle-arrow::after { content: "▼"; color: gray; font-size: 10px; }
+        .vc-toggle-arrow.hidden::after { content: "▲"; }
+        .vc-toggle-arrow:hover::before { content: "Hide"; position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.5); color: white; padding: 3px 6px; border-radius: 3px; font-size: 10px; white-space: nowrap; z-index: 1002; }
+        .vc-toggle-arrow.hidden:hover::before { content: "Show"; }
+        .vc-actor-container.minimized { height: 15px; }
+        #welcome-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 2000; transition: opacity 0.5s ease, visibility 0s linear 0.5s; visibility: visible; opacity: 1; }
+        #welcome-overlay.hidden { opacity: 0; visibility: hidden; pointer-events: none; transition-delay: 0s; }
+        .welcome-text { color: white; font-size: 48px; font-weight: bold; text-align: center; margin-bottom: 20px; text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5); }
+        .description-text { color: white; font-size: 18px; text-align: center; margin-bottom: 30px; min-height: 24px; text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.5); }
+        .start-button { padding: 15px 30px; font-size: 18px; color: white; background: linear-gradient(135deg, #FF5722, #D81B60); border: none; border-radius: 25px; cursor: pointer; transition: transform 0.3s ease, box-shadow 0.3s ease; box-shadow: 0 0 15px rgba(255, 87, 34, 0.7); animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { transform: scale(1); box-shadow: 0 0 15px rgba(255, 87, 34, 0.7); } 50% { transform: scale(1.05); box-shadow: 0 0 25px rgba(255, 87, 34, 1); } 100% { transform: scale(1); box-shadow: 0 0 15px rgba(255, 87, 34, 0.7); } }
+        .start-button:hover { transform: scale(1.1); box-shadow: 0 0 30px rgba(255, 87, 34, 1); animation: none; }
+        .start-button:active { transform: scale(0.95); }
+        .bottom-logo-container { position: absolute; bottom: 50px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; }
+        .bottom-logo { width: 50px; height: auto; margin-bottom: 10px; }
+        .credit-text { color: white; font-size: 14px; text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5); }
+        .yellow-hotspot { position: fixed; width: 20px; height: 20px; background: yellow; border-radius: 50%; z-index: 1000; animation: pulse-hotspot 1.5s infinite; cursor: default; display: none; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+        @keyframes pulse-hotspot { 0% { transform: scale(1) translate(-50%, -50%); opacity: 1; } 50% { transform: scale(1.3) translate(-50%, -50%); opacity: 0.7; } 100% { transform: scale(1) translate(-50%, -50%); opacity: 1; } }
+        .hotspot-tooltip { position: absolute; background: rgba(0, 0, 0, 0.9); color: white; padding: 5px 10px; border-radius: 3px; font-size: 12px; white-space: nowrap; z-index: 1001; display: none; pointer-events: none; }
+        .yellow-hotspot .hotspot-tooltip { top: -30px; left: 50%; transform: translateX(-50%); }
+        .yellow-hotspot:hover .hotspot-tooltip { display: block; }
+        .pnlm-hotspot.pnlm-info { /* Default Pannellum info hotspots */ }
+        .pnlm-tooltip { /* Default Pannellum tooltip style */ background-color: rgba(50, 50, 50, 0.9) !important; color: white !important; border-radius: 4px !important; padding: 6px 10px !important; font-size: 13px !important; box-shadow: 0 2px 5px rgba(0,0,0,0.3); max-width: none !important; }
+
+        /* --- Hover Card Styles (Original Dockable Card - Col V/W) --- */
+        .hover-card { position: absolute; background: white; border-radius: 5px; z-index: 2000; max-width: 400px; transition: opacity 0.3s ease; visibility: hidden; opacity: 0; box-shadow: 0 5px 15px rgba(0,0,0,0.3); box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; padding: 15px; transform: none; justify-content: flex-start; align-items: center; }
+        .hover-card.visible:not(.docked-card) { visibility: visible; opacity: 0.5; transition: opacity 0.2s ease; padding: 30px 15px 15px 15px; }
+        .hover-card.visible:not(.docked-card):hover, .hover-card.visible.pinned:not(.docked-card) { opacity: 1; }
+        .hover-card.category-hover-card { justify-content: center !important; align-items: center !important; }
+        .hover-card:not(.docked-card) img { max-width: 100%; max-height: 80%; width: auto; height: auto; object-fit: contain; flex-shrink: 0; margin-bottom: 10px; }
+        .hover-card-details { color: #333; font-size: 13px; text-align: left; width: 100%; overflow-y: auto; display: none; padding: 0; box-sizing: border-box; max-height: 100px; }
+        .hover-card:not(.docked-card) .hover-card-details { display: none !important; }
+        .docked-card { position: fixed; left: 0; top: 0; height: 100%; width: 300px; background: white; z-index: 2000; padding: 30px 0 0 0; transform: none; opacity: 1; box-shadow: 0 5px 15px rgba(0,0,0,0.3); display: flex; flex-direction: column; justify-content: flex-start; box-sizing: border-box; visibility: visible; transition-delay: 0s; align-items: initial; transition: none; }
+        .hover-card img { object-fit: contain; display: block; margin: 0 auto; }
+        .docked-card img { width: calc(100% - 40px); height: auto; max-height: 70%; object-fit: contain; flex-shrink: 0; margin: 0 20px 15px 20px; }
+        .docked-card .hover-card-details { display: block !important; padding: 0 20px 20px 20px; max-height: none; overflow-y: auto; flex-grow: 1; }
+        .close-btn { position: absolute; top: 10px; right: 10px; cursor: pointer; font-size: 20px; color: #333; z-index: 2001; }
+        .dock-btn { position: absolute; top: 10px; right: 35px; cursor: pointer; font-size: 16px; color: #333; z-index: 2001; display: none; }
+        .hover-card.visible:not(.docked-card) .dock-btn { display: inline; }
+
+        /* --- START: Custom Hover Card Styles (for ALL Sheet 2 Hotspots) --- */
+        .custom-hover-card { /* Renamed class for clarity */
+            background-color: white !important;
+            color: #333 !important;
+            padding: 12px !important;
+            border-radius: 6px !important;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.25) !important;
+            max-width: 280px !important;
+            min-width: 180px;
+            font-family: Arial, sans-serif !important;
+            font-size: 13px !important;
+            line-height: 1.4 !important;
+            pointer-events: auto !important;
+            display: flex !important;
+            flex-direction: column !important;
+            gap: 8px !important;
+            text-align: left !important;
+        }
+
+        .custom-hover-card .card-image {
+            width: 100%;
+            height: 140px;
+            object-fit: cover;
+            border-radius: 4px;
+            display: block;
+            margin-bottom: 4px; /* Space below image */
+        }
+
+        .custom-hover-card .card-header { /* Contains Title and Price */
+            display: flex;
+            justify-content: space-between; /* Pushes title left, price right */
+            align-items: flex-start; /* Align items to the top of the header */
+            gap: 8px; /* Space between title and price if they wrap */
+            width: 100%;
+        }
+
+        .custom-hover-card .card-title {
+            font-size: 15px;
+            font-weight: bold;
+            margin: 0;
+            color: #111;
+            line-height: 1.3;
+            flex-grow: 1; /* Allow title to take available space */
+            padding-right: 5px; /* Prevent title touching price */
+        }
+
+        .custom-hover-card .card-description {
+            font-size: 12px;
+            margin: 0; /* Reset margin */
+            color: #555;
+            width: 100%; /* Take full width below header */
+            padding-top: 4px; /* Add space above description */
+        }
+
+        .custom-hover-card .card-price-section {
+            display: flex;
+            align-items: center; /* Vertically align symbol and price */
+            white-space: nowrap; /* Prevent price wrapping */
+            flex-shrink: 0; /* Prevent price section from shrinking */
+        }
+
+        .custom-hover-card .currency-symbol-img {
+            width: 14px;
+            height: 14px;
+            margin-right: 3px;
+            vertical-align: middle; /* Align with text */
+            display: inline-block;
+        }
+        .custom-hover-card .currency-symbol-text {
+            font-size: 14px;
+            font-weight: normal;
+            color: #444;
+            margin-right: 3px;
+            vertical-align: middle;
+            display: inline-block;
+        }
+
+        .custom-hover-card .price-value {
+            font-size: 14px;
+            font-weight: bold;
+            color: #007bff;
+            vertical-align: middle;
+            display: inline-block;
+        }
+        /* --- END: Custom Hover Card Styles --- */
+
+    </style>
+</head>
+<body>
+    <div id="panorama"></div>
+    <div id="loading">Loading Virtual Tour...</div>
+    <img id="logoImg" class="logo-img logo-tr" src="" alt="Tour Logo" style="display: none;">
+    <div class="control-bar" id="controlBar">
+        <div class="slide-arrow" id="slideArrow" title="Toggle Thumbnails"></div>
+        <div class="category-icon" id="categoryIcon" title="Select Floor"></div>
+        <div class="fullscreen-btn" id="fullscreenBtn" title="Toggle Fullscreen"></div>
+        <div class="audio-btn play" id="playBtn" title="Play/Pause Audio"></div>
+        <div class="audio-btn bgm-toggle" id="bgmToggle" title="Toggle Background Music"></div>
+        <div class="audio-btn vc-toggle" id="vcToggle" title="Toggle Voice Commentary"></div>
+        <div class="category-list" id="categoryList"></div>
+     </div>
+     <div class="slide-bar" id="slideBar">
+        <div class="slide-bar-content">
+            <div class="category-name" id="categoryName">All Floors</div>
+            <div class="thumbnail-container" id="thumbnailContainer"></div>
+            <div class="scroll-indicator" id="scrollIndicator">
+                 <div class="scroll-progress" id="scrollProgress"></div>
+            </div>
+            <div class="slide-counter" id="slideCounter">1 / 1</div>
+        </div>
+    </div>
+    <div class="vc-actor-container" id="vcActorContainer">
+        <img id="vcActorImage" src="" alt="VC Actor Avatar">
+        <div class="vc-toggle-arrow" id="vcToggleArrow" title="Show/Hide Avatar"></div>
+    </div>
+    <div id="welcome-overlay">
+        <div class="welcome-text">Welcome to our Virtual Tour</div>
+        <div class="description-text" id="descriptionText"></div>
+        <button class="start-button" id="startButton">Start Tour</button>
+        <div class="bottom-logo-container">
+            <img id="bottomLogo" class="bottom-logo" src="" alt="Bottom Logo">
+            <div class="credit-text">© 2025-2030 Powered by Brand Name</div>
+        </div>
+    </div>
+    <div id="hoverCard" class="hover-card"> <span class="close-btn" title="Close">×</span>
+        <span class="dock-btn" title="Dock Card">Dock</span>
+        <img id="hoverCardImage" src="" alt="Hover Card Content">
+        <div id="hoverCardText" class="hover-card-details"></div>
+    </div>
+    <div id="yellowHotspot" class="yellow-hotspot">
+        <span class="hotspot-tooltip"></span>
+    </div>
+
+    <script>
+        // --- Global Variables ---
+        let viewer; let scenes = []; let additionalHotspots = []; let currentSceneIndex = 0; let tourLogoUrl = '';
+        let categories = new Set(['all', 'Ground Floor', 'First Floor']); let filteredScenes = []; let targetScrollLeft = 0;
+        let currentScrollLeft = 0; let isDraggingThumbnails = false; let startX; let startScrollLeft; let touchStartX;
+        let touchStartY; let touchStartScrollLeft; let slideBarVisible = false; let slideBarPinned = false; let categoryListVisible = false;
+        let isDraggingScrollIndicator = false; let bgmAudio = new Audio(); let vcAudio = new Audio(); let isBgmOn = true;
+        let isVcOn = true; let isAudioPlaying = false; let hasInteracted = false; let isInitialLoad = true; let ttsUtterance = null;
+        let isTTSPlaying = false; let isAutoPlayEnabled = true; let isDraggingVc = false; let vcStartX; let vcStartY; let vcOffsetX;
+        let vcOffsetY; let isVcHidden = false; let scrollAnimationStartTime = null; let scrollAnimationDuration = 300;
+        let scrollStartPosition = 0; let currentCard = null; let hoverTimeout = null; let cardWasPinnedByClick = false;
+        let welcomeOverlayVisible = true; const descriptionSentences = [ "Brand premium Sofas", "Brand new premium Beddings", "Brand premium floor matts", "Brand premium Chairs" ];
+        let currentSentenceIndex = 0; let currentText = "Brand"; let typingSpeed = 80; let eraseSpeed = 10; let delayBetweenSentences = 1500;
+        let initialScenePitch = 0; let initialSceneYaw = 0; let autoRotateTimeoutId = null; let interactionTimeoutId = null;
+        let isInteracting = false; let currentSceneAutoRotateSpeed = 0; let tourStarted = false;
+
+        // --- Utility Functions ---
+        function ease(t) { const t2 = t * t; const t3 = t2 * t; return 4 * t3 - 6 * t2 + 4 * t; }
+        const parseNumeric = (value, defaultValue = 0) => { const num = parseFloat(value); return !isNaN(num) ? num : defaultValue; };
+        const parseBoolean = (value, defaultValue = false) => { if (value === null || value === undefined || String(value).trim() === '') return defaultValue; return String(value).trim().toLowerCase() === 'true'; };
+
+        // --- Core Logic ---
+        async function loadTourData() {
+            try {
+                const excelUrl = 'https://raw.githubusercontent.com/Rmoosa2014/vr-tour/main/360MasterData.xlsx';
+                console.log(`[DEBUG] Fetching Excel: ${excelUrl}`);
+                const response = await fetch(excelUrl);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const arrayBuffer = await response.arrayBuffer();
+                const data = new Uint8Array(arrayBuffer);
+                const workbook = XLSX.read(data, { type: 'array' });
+
+                // --- Process Sheet 1: Scene Data ---
+                const sceneSheetName = workbook.SheetNames[0];
+                const sceneWorksheet = workbook.Sheets[sceneSheetName];
+                if (!sceneWorksheet) throw new Error(`Sheet "${sceneSheetName}" not found.`);
+                const sceneJsonData = XLSX.utils.sheet_to_json(sceneWorksheet, { defval: null });
+                console.log(`[DEBUG] Processing Sheet 1: "${sceneSheetName}" (${sceneJsonData.length} rows)`);
+                const sceneColumns = Object.keys(sceneJsonData[0] || {});
+                scenes = sceneJsonData.map((row, index) => {
+                    const findCol = (keywords) => sceneColumns.find(col => keywords.some(kw => col.toLowerCase().includes(kw)));
+                    const imageUrlColumn = findCol(['panorama', 'url']);
+                    const sceneIdColumn = findCol(['sceneid']);
+                    const isVisible = parseBoolean(row[sceneColumns[18]], true); // Col S
+                    const sceneId = sceneIdColumn && row[sceneIdColumn] ? String(row[sceneIdColumn]).trim() : `Scene-${index + 1}`;
+                    if (!imageUrlColumn || !row[imageUrlColumn] || !isVisible || !sceneId) return null; // Basic validity check
+                    const sceneNameColumn = findCol(['scenedisplayname', 'name', 'scene']);
+                    const thumbnailColumn = findCol(['thumb', 'preview']);
+                    const categoryColumn = findCol(['floorgroupname']);
+                    if (index === 0) { const logoColumn = findCol(['logo']); if (logoColumn && row[logoColumn]) tourLogoUrl = String(row[logoColumn]).trim(); }
+                    const category = categoryColumn && row[categoryColumn] ? String(row[categoryColumn]).trim() : 'Uncategorized';
+                    const bgmActive = parseBoolean(row[sceneColumns[8]], false); const vcActive = parseBoolean(row[sceneColumns[12]], false);
+                    const showCard = parseBoolean(row[sceneColumns[23]], false); const showHotspot = parseBoolean(row[sceneColumns[20]], false);
+                    const getPitchYaw = parseBoolean(row[sceneColumns[24]], false); const floorMapDetails = sceneColumns[22] ? String(row[sceneColumns[22]] || '').trim() : '';
+                    const cardUrl = sceneColumns[21] ? String(row[sceneColumns[21]] || '').trim() : null; const hotspotIdText = sceneColumns[19] ? String(row[sceneColumns[19]] || '').trim() : null;
+                    let bgColor = 'transparent'; if (sceneColumns[11] && row[sceneColumns[11]]) { const bgValue = String(row[sceneColumns[11]]).trim(); if (bgValue.includes(',')) { const parts = bgValue.split(',').map(val => val.trim()); if (parts.length === 4 && parts.every(p => p !== '')) bgColor = `rgba(${parts[0]}, ${parts[1]}, ${parts[2]}, ${parts[3]})`; } else if (bgValue) { bgColor = bgValue.toLowerCase(); } }
+                    const pitch = parseNumeric(row[sceneColumns[13]], 0); const yaw = parseNumeric(row[sceneColumns[14]], 0); const zoom = parseNumeric(row[sceneColumns[15]], 100); const rotateSpeed = parseNumeric(row[sceneColumns[16]], 0);
+                    if (index === 0) { initialScenePitch = pitch; initialSceneYaw = yaw; }
+                    return { id: sceneId, internalId: `Slide-${index + 1}`, name: sceneNameColumn ? String(row[sceneNameColumn] || `Slide ${index + 1}`).trim() : `Slide ${index + 1}`, imageUrl: String(row[imageUrlColumn]).trim(), thumbnailUrl: thumbnailColumn ? String(row[thumbnailColumn] || '').trim() : String(row[imageUrlColumn]).trim(), category: category, isVisible: isVisible, bgmUrl: sceneColumns[7] && row[sceneColumns[7]] ? String(row[sceneColumns[7]]).trim() : null, vcUrl: sceneColumns[9] && row[sceneColumns[9]] ? String(row[sceneColumns[9]]).trim() : null, bgmActive: bgmActive, vcActive: vcActive, vcActorAvatarUrl: sceneColumns[10] && row[sceneColumns[10]] ? String(row[sceneColumns[10]]).trim() : null, vcActorBgColor: bgColor, initialPitch: pitch, initialYaw: yaw, initialZoom: zoom, autoRotate: rotateSpeed, hotspotIdText: hotspotIdText, cardUrl: cardUrl, floorMapDetails: floorMapDetails, showCard: showCard, showHotspot: showHotspot, getPitchYaw: getPitchYaw };
+                }).filter(scene => scene !== null);
+                console.log(`[DEBUG] Loaded ${scenes.length} valid scenes from Sheet 1.`);
+
+                // --- Process Sheet 2: Additional Hotspot Data ---
+                const hotspotSheetName = "2. Hotspots Sheet";
+                const hotspotWorksheet = workbook.Sheets[hotspotSheetName];
+                if (!hotspotWorksheet) { console.warn(`[DEBUG] Sheet "${hotspotSheetName}" not found.`); additionalHotspots = []; }
+                else {
+                    const hotspotJsonData = XLSX.utils.sheet_to_json(hotspotWorksheet, { defval: null }); console.log(`[DEBUG] Processing Sheet 2: "${hotspotSheetName}" (${hotspotJsonData.length} rows)`);
+                    const hotspotColumns = Object.keys(hotspotJsonData[0] || {});
+                    const targetSceneIdColIdx = 2; const hotspotNameColIdx = 4; const hotspotPitchColIdx = 8; const hotspotYawColIdx = 9; const cardImageUrlColIdx = 12; const cardTitleColIdx = 13; const cardDescriptionColIdx = 14; const cardCurrencySymbolColIdx = 15; const cardPriceValueColIdx = 16;
+                    if (hotspotColumns.length <= Math.max(targetSceneIdColIdx, hotspotNameColIdx, hotspotPitchColIdx, hotspotYawColIdx)) { console.error("[DEBUG] Error: Not enough columns in Sheet 2."); additionalHotspots = []; }
+                    else {
+                        additionalHotspots = hotspotJsonData.map((row, index) => {
+                            const targetSceneId = row[hotspotColumns[targetSceneIdColIdx]] ? String(row[hotspotColumns[targetSceneIdColIdx]]).trim() : null; if (!targetSceneId) return null;
+                            const name = row[hotspotColumns[hotspotNameColIdx]] ? String(row[hotspotColumns[hotspotNameColIdx]]).trim() : `Hotspot ${index + 1}`;
+                            const pitch = parseNumeric(row[hotspotColumns[hotspotPitchColIdx]], 0); const yaw = parseNumeric(row[hotspotColumns[hotspotYawColIdx]], 0);
+                            const cardImageUrl = hotspotColumns.length > cardImageUrlColIdx ? String(row[hotspotColumns[cardImageUrlColIdx]] || '').trim() : null;
+                            const cardTitle = hotspotColumns.length > cardTitleColIdx ? String(row[hotspotColumns[cardTitleColIdx]] || '').trim() : null;
+                            const cardDescription = hotspotColumns.length > cardDescriptionColIdx ? String(row[hotspotColumns[cardDescriptionColIdx]] || '').trim() : null;
+                            const cardCurrencySymbol = hotspotColumns.length > cardCurrencySymbolColIdx ? String(row[hotspotColumns[cardCurrencySymbolColIdx]] || '').trim() : null;
+                            const cardPriceValue = hotspotColumns.length > cardPriceValueColIdx ? String(row[hotspotColumns[cardPriceValueColIdx]] || '').trim() : null;
+                            return { targetSceneId, name, pitch, yaw, cardImageUrl, cardTitle, cardDescription, cardCurrencySymbol, cardPriceValue };
+                        }).filter(hotspot => hotspot !== null); console.log(`[DEBUG] Loaded ${additionalHotspots.length} valid additional hotspots from Sheet 2.`);
+                    }
+                }
+
+                if (scenes.length === 0) throw new Error('No valid scenes found.');
+                filteredScenes = [...scenes];
+                populateCategoryFilter(); createSlideBar(); initializeViewer(); setupSlideBarInteractions(); setupVcContainerInteractions(); updateSlideCounter(); animateScroll(); startTypingAnimation(); setupStartButton();
+
+            } catch (error) {
+                console.error('[DEBUG] Error loading tour data:', error); const loadingDiv = document.getElementById('loading'); if (loadingDiv) { loadingDiv.textContent = `Error: ${error.message}. Check console.`; loadingDiv.style.color = 'red'; }
+            }
+        }
+
+        function initializeViewer() {
+            const panorama = document.getElementById('panorama'); if (!panorama) { console.error('[DEBUG] Panorama element not found'); return; }
+            const pannellumConfig = { type: 'equirectangular', scenes: {}, autoLoad: false, showControls: false, compass: false, draggable: true, mouseZoom: true, touchPan: true, touchZoom: true, hotSpotDebug: false, sceneFadeDuration: 1000, };
+            try { viewer = pannellum.viewer('panorama', pannellumConfig); } catch (error) { console.error("[DEBUG] Pannellum init error:", error); return; }
+            console.log("[DEBUG] Pannellum viewer initialized.");
+
+            scenes.forEach((scene) => {
+                const sceneHotspots = [];
+                console.log(`[DEBUG] Preparing scene: ${scene.id} (Name: ${scene.name})`);
+
+                // Add original hotspot (Sheet 1 Cols T, U, X)
+                if (scene.showHotspot) { sceneHotspots.push({ pitch: scene.initialPitch + 5, yaw: scene.initialYaw + 10, type: 'info', text: scene.hotspotIdText || 'Info', clickHandlerFunc: handleInfoHotspotClick, clickHandlerArgs: { sceneId: scene.id, showCard: scene.showCard } }); }
+
+                // Add hotspots from Sheet 2
+                let sheet2HotspotCount = 0;
+                additionalHotspots.filter(hs => hs.targetSceneId === scene.id).forEach(newHotspot => {
+                    let hotspotConfig = { pitch: newHotspot.pitch, yaw: newHotspot.yaw, type: 'info' };
+
+                    // *** Apply custom tooltip to ALL Sheet 2 hotspots ***
+                    console.log(`[DEBUG] Assigning createCustomHoverCard for hotspot: ${newHotspot.name} in scene ${scene.id}`);
+                    hotspotConfig.createTooltipFunc = createCustomHoverCard; // Assign the updated function name
+                    hotspotConfig.createTooltipArgs = { // Pass the required data
+                        imageUrl: newHotspot.cardImageUrl,
+                        title: newHotspot.cardTitle,
+                        description: newHotspot.cardDescription,
+                        currencySymbol: newHotspot.cardCurrencySymbol, // Pass raw symbol data
+                        priceValue: newHotspot.cardPriceValue
+                    };
+                    // console.log(`[DEBUG]   Args for createCustomHoverCard:`, hotspotConfig.createTooltipArgs); // Uncomment if needed
+                    sheet2HotspotCount++;
+
+                    sceneHotspots.push(hotspotConfig);
+                });
+                console.log(`[DEBUG] Scene ${scene.id}: Added ${sceneHotspots.length} total hotspots (${sheet2HotspotCount} from Sheet 2).`);
+
+                viewer.addScene(scene.id, { title: scene.name, panorama: scene.imageUrl, pitch: scene.initialPitch, yaw: scene.initialYaw, hfov: scene.initialZoom, autoRotate: scene.autoRotate, hotSpots: sceneHotspots });
+            });
+            console.log("[DEBUG] All scenes added to Pannellum config.");
+
+            // Setup Event Listeners
+            viewer.on('load', () => { const sceneId = viewer.getScene(); console.log('[DEBUG] Viewer loaded scene:', sceneId); const loadingDiv = document.getElementById('loading'); if (loadingDiv && loadingDiv.style.display !== 'none') { loadingDiv.style.display = 'none'; } if (sceneId) { currentSceneIndex = filteredScenes.findIndex(s => s.id === sceneId); if (currentSceneIndex !== -1) { const currentScene = filteredScenes[currentSceneIndex]; currentSceneAutoRotateSpeed = currentScene.autoRotate || 0; updateActiveThumbnail(sceneId); updateYellowHotspotTooltip(); playSceneAudio(sceneId); if (tourStarted) { handleDelayedAutoRotate(sceneId); } else if (currentSceneIndex === 0 && currentSceneAutoRotateSpeed !== 0) { viewer.startAutoRotate(currentSceneAutoRotateSpeed); } else { viewer.stopAutoRotate(); } } else { console.warn(`[DEBUG] Loaded scene ID "${sceneId}" not found.`); currentSceneAutoRotateSpeed = 0; viewer.stopAutoRotate(); } } else { console.warn("[DEBUG] Load event no sceneId."); currentSceneAutoRotateSpeed = 0; viewer.stopAutoRotate(); } adjustViewerSize(); });
+            viewer.on('scenechange', (newSceneId) => { console.log('[DEBUG] Scene changing to:', newSceneId); clearTimeout(autoRotateTimeoutId); clearTimeout(interactionTimeoutId); viewer.stopAutoRotate(); if (newSceneId) { const newSceneIndex = filteredScenes.findIndex(s => s.id === newSceneId); if (newSceneIndex !== -1) { const newScene = filteredScenes[newSceneIndex]; currentSceneIndex = newSceneIndex; currentSceneAutoRotateSpeed = newScene.autoRotate || 0; if (currentCard && currentCard.classList.contains('docked-card')) { if (newScene.showCard === true) { updateCardContent(newScene); } else { hideHoverCard(currentCard); } } else if (currentCard && !currentCard.classList.contains('docked-card')) { hideHoverCard(currentCard); } updateYellowHotspotTooltip(); } else { console.warn(`[DEBUG] Scene ID "${newSceneId}" not found.`); currentSceneIndex = -1; currentSceneAutoRotateSpeed = 0; if (currentCard) hideHoverCard(currentCard); updateYellowHotspotTooltip(); } } else { console.warn("[DEBUG] Scene change no sceneId."); currentSceneIndex = -1; currentSceneAutoRotateSpeed = 0; if (currentCard) hideHoverCard(currentCard); updateYellowHotspotTooltip(); } });
+            viewer.on('mousedown', handleInteractionStart); viewer.on('touchstart', handleInteractionStart); viewer.on('mouseup', handleInteractionEnd); viewer.on('touchend', handleInteractionEnd); viewer.on('zoomstart', handleInteractionStart); viewer.on('zoomchange', handleInteractionEnd); viewer.on('animatefinished', handleInteractionEnd); viewer.on('animatefinished', updateYellowHotspotTooltip); viewer.on('zoomchange', updateYellowHotspotTooltip); viewer.on('viewchange', updateYellowHotspotTooltip);
+
+            // Load Initial Scene
+            if (filteredScenes.length > 0 && filteredScenes[0]?.id) { console.log("[DEBUG] Loading initial scene:", filteredScenes[0].id); viewer.loadScene(filteredScenes[0].id); }
+            else { console.error("[DEBUG] No valid scenes to load."); if (document.getElementById('loading')) document.getElementById('loading').textContent = 'Error: No scenes.'; }
+
+            // Set Logos
+            const logoImg = document.getElementById('logoImg'); const bottomLogo = document.getElementById('bottomLogo'); if (tourLogoUrl) { if (logoImg) { logoImg.src = tourLogoUrl; logoImg.style.display = 'block'; logoImg.onerror = () => { logoImg.style.display='none'; }} if (bottomLogo) { bottomLogo.src = tourLogoUrl; bottomLogo.style.display = 'block'; bottomLogo.onerror = () => { bottomLogo.style.display='none'; }} } else { console.warn("[DEBUG] No Logo URL."); }
+            setupAudioControls();
+        }
+
+        // --- Other Functions (Keep exactly as in the previous version, MINIMIZED for brevity) ---
+        function setupStartButton() { const welcomeOverlay = document.getElementById('welcome-overlay'); const startButton = document.getElementById('startButton'); if (!welcomeOverlay || !startButton || !viewer) return; startButton.removeEventListener('click', handleStartTour); startButton.addEventListener('click', handleStartTour); function handleStartTour(e) { e.stopPropagation(); e.preventDefault(); if (tourStarted) return; tourStarted = true; welcomeOverlay.classList.add('hidden'); welcomeOverlayVisible = false; hasInteracted = true; isAudioPlaying = true; isAutoPlayEnabled = true; const playBtn = document.getElementById('playBtn'); if (playBtn) playBtn.classList.add('paused'); console.log("Start Tour clicked."); viewer.stopAutoRotate(); clearTimeout(autoRotateTimeoutId); clearTimeout(interactionTimeoutId); viewer.lookAt(initialScenePitch, initialSceneYaw, viewer.getHfov(), 500); setTimeout(() => { if (viewer && viewer.getScene()) { const currentSceneId = viewer.getScene(); playSceneAudio(currentSceneId); handleDelayedAutoRotate(currentSceneId); } }, 100); } }
+        function handleDelayedAutoRotate(sceneId) { if (!viewer || !tourStarted) return; clearTimeout(autoRotateTimeoutId); const scene = filteredScenes.find(s => s.id === sceneId); if (!scene) { currentSceneAutoRotateSpeed = 0; return; } if (currentSceneAutoRotateSpeed !== 0 && !isInteracting) { autoRotateTimeoutId = setTimeout(() => { if (!isInteracting) viewer.startAutoRotate(currentSceneAutoRotateSpeed); }, 25000); } else { viewer.stopAutoRotate(); } }
+        function handleInteractionStart() { if (!viewer || !tourStarted) return; if (!isInteracting) { isInteracting = true; viewer.stopAutoRotate(); clearTimeout(autoRotateTimeoutId); clearTimeout(interactionTimeoutId); } }
+        function handleInteractionEnd() { if (!viewer || !tourStarted || !isInteracting) return; isInteracting = false; clearTimeout(interactionTimeoutId); interactionTimeoutId = setTimeout(() => { if (!isInteracting && currentSceneAutoRotateSpeed !== 0) viewer.startAutoRotate(currentSceneAutoRotateSpeed); }, 25000); }
+        function populateCategoryFilter() { const categoryList = document.getElementById('categoryList'); if (!categoryList) return; categoryList.innerHTML = ''; const fixedCategories = ['All Floors', 'Ground Floor', 'First Floor'].reverse(); fixedCategories.forEach(category => { const item = document.createElement('div'); item.className = 'category-item'; item.textContent = category; item.dataset.category = category === 'All Floors' ? 'all' : category; if (category === 'All Floors') item.classList.add('active'); item.addEventListener('click', (e) => { e.stopPropagation(); document.querySelectorAll('.category-item').forEach(i => i.classList.remove('active')); item.classList.add('active'); filterScenes(item.dataset.category); toggleSlideBar(true, true); toggleCategoryList(false); if (currentCard && !currentCard.classList.contains('docked-card')) { hideHoverCard(); } }); item.addEventListener('mouseenter', (e) => { e.stopPropagation(); if (hoverTimeout) clearTimeout(hoverTimeout); const hoveredCategory = item.dataset.category; if (hoveredCategory === 'all') { if (currentCard && !currentCard.classList.contains('docked-card')) { hideHoverCard(); } return; } const currentActiveScene = (filteredScenes && currentSceneIndex >= 0 && currentSceneIndex < filteredScenes.length) ? filteredScenes[currentSceneIndex] : null; const shouldShowOriginalCard = currentActiveScene && currentActiveScene.category === hoveredCategory && currentActiveScene.showCard === true; if (shouldShowOriginalCard) { showHoverCard(currentActiveScene, true, e.target, true); } else { if (currentCard && !currentCard.classList.contains('docked-card')) { hideHoverCard(); } } }); item.addEventListener('mouseleave', (e) => { e.stopPropagation(); if (hoverTimeout) clearTimeout(hoverTimeout); if (currentCard && !currentCard.classList.contains('pinned') && !currentCard.classList.contains('docked-card')) { hoverTimeout = setTimeout(() => { if (currentCard && !currentCard.classList.contains('docked-card') && !currentCard.classList.contains('pinned') && !currentCard.matches(':hover')) { hideHoverCard(); } }, 300); } }); categoryList.appendChild(item); }); }
+        function filterScenes(category) { const categoryName = document.getElementById('categoryName'); if (!categoryName) return; if (category === 'all') { filteredScenes = [...scenes]; categoryName.textContent = 'All Floors'; } else { filteredScenes = scenes.filter(scene => scene.category === category); categoryName.textContent = category; } const thumbnailContainer = document.getElementById('thumbnailContainer'); if (!thumbnailContainer) return; thumbnailContainer.innerHTML = ''; createSlideBar(); if (filteredScenes.length > 0 && viewer) { currentSceneIndex = 0; viewer.loadScene(filteredScenes[0].id); } else if (viewer) { console.warn(`No scenes for: ${category}`); currentSceneIndex = -1; updateSlideCounter(); viewer.stopAutoRotate(); clearTimeout(autoRotateTimeoutId); clearTimeout(interactionTimeoutId); currentSceneAutoRotateSpeed = 0; } }
+        function createSlideBar() { const thumbnailContainer = document.getElementById('thumbnailContainer'); if (!thumbnailContainer) return; thumbnailContainer.innerHTML = ''; filteredScenes.forEach((scene) => { const thumbnail = document.createElement('div'); thumbnail.className = 'thumbnail'; thumbnail.dataset.sceneId = scene.id; const img = document.createElement('img'); img.src = scene.thumbnailUrl || scene.imageUrl; img.alt = scene.name; img.onerror = () => { img.src = scene.imageUrl; img.onerror = () => { thumbnail.innerHTML = `<span>Err</span>`; }; }; thumbnail.appendChild(img); const nameSpan = document.createElement('span'); nameSpan.className = 'thumbnail-name'; nameSpan.textContent = scene.name; thumbnail.appendChild(nameSpan); thumbnail.addEventListener('click', (e) => { e.stopPropagation(); if (viewer && viewer.getScene() !== scene.id) { viewer.loadScene(scene.id); } }); thumbnailContainer.appendChild(thumbnail); }); if (thumbnailContainer.children.length > 0 && viewer && viewer.getScene()) { updateActiveThumbnail(viewer.getScene()); } else if (thumbnailContainer.children.length > 0) { thumbnailContainer.children[0].classList.add('active'); } updateSlideCounter(); updateScrollIndicator(); }
+        function setupSlideBarInteractions() { const slideBar=document.getElementById('slideBar'),tnCont=document.getElementById('thumbnailContainer'),slArr=document.getElementById('slideArrow'),catIcn=document.getElementById('categoryIcon'),catLst=document.getElementById('categoryList'),ctrlBar=document.getElementById('controlBar'),scrInd=document.getElementById('scrollIndicator'),scrPrg=document.getElementById('scrollProgress'),fsBtn=document.getElementById('fullscreenBtn'); if(!slideBar||!tnCont||!slArr||!catIcn||!catLst||!ctrlBar||!scrInd||!scrPrg||!fsBtn) return; slideBar.addEventListener('mouseenter',()=>{if(!slideBarPinned)toggleSlideBar(true,false)}); slideBar.addEventListener('mouseleave',()=>{if(!slideBarPinned)toggleSlideBar(false,false)}); slArr.addEventListener('click',(e)=>{e.stopPropagation();slideBarPinned=!slideBarPinned;toggleSlideBar(slideBarPinned,slideBarPinned)}); catIcn.addEventListener('mousedown',(e)=>{e.stopPropagation();toggleCategoryList(!categoryListVisible)}); document.addEventListener('mouseup',(e)=>{if(categoryListVisible&&!catLst.contains(e.target)&&!catIcn.contains(e.target)){toggleCategoryList(false)}}); catLst.addEventListener('mouseenter',()=>{if(categoryListVisible)toggleCategoryList(true)}); catLst.addEventListener('mouseleave',()=>{if(categoryListVisible&&!catIcn.matches(':hover'))toggleCategoryList(false)}); document.addEventListener('click',(e)=>{const card=document.getElementById('hoverCard'); const isOutside=!slideBar.contains(e.target)&&!ctrlBar.contains(e.target)&&!catLst.contains(e.target)&&!catIcn.contains(e.target)&&!fsBtn.contains(e.target)&&!(card&&card.contains(e.target)); if(isOutside){if(slideBarPinned){slideBarPinned=false;toggleSlideBar(false,false)} if(categoryListVisible){toggleCategoryList(false)} if(currentCard&&!currentCard.classList.contains('docked-card')){hideHoverCard()}} if(!hasInteracted)hasInteracted=true}); document.addEventListener('mousemove',(e)=>{if(isDraggingScrollIndicator){const contW=scrInd.offsetWidth; const clickX=e.clientX-scrInd.getBoundingClientRect().left; const perc=Math.min(Math.max(clickX/contW,0),1); const maxS=tnCont.scrollWidth-tnCont.clientWidth; targetScrollLeft=maxS*perc; tnCont.scrollLeft=targetScrollLeft; currentScrollLeft=targetScrollLeft; updateScrollIndicator(); e.preventDefault()} if(isDraggingVc){const vcCont=document.getElementById('vcActorContainer'); const nR=vcOffsetX-(e.pageX-vcStartX); const nB=vcOffsetY-(e.pageY-vcStartY); vcCont.style.right=`${nR}px`; vcCont.style.bottom=`${nB}px`; e.preventDefault()}}); document.addEventListener('mouseup',()=>{if(isDraggingScrollIndicator){isDraggingScrollIndicator=false; document.body.style.cursor=''} if(isDraggingVc){isDraggingVc=false; document.body.style.cursor=''}}); scrInd.addEventListener('mousedown',(e)=>{isDraggingScrollIndicator=true; document.body.style.cursor='ew-resize'; const contW=scrInd.offsetWidth; const clickX=e.clientX-scrInd.getBoundingClientRect().left; const perc=Math.min(Math.max(clickX/contW,0),1); const maxS=tnCont.scrollWidth-tnCont.clientWidth; targetScrollLeft=maxS*perc; tnCont.scrollLeft=targetScrollLeft; currentScrollLeft=targetScrollLeft; updateScrollIndicator(); e.preventDefault(); e.stopPropagation()}); slideBar.addEventListener('touchstart',(e)=>{if(e.target===scrInd||scrInd.contains(e.target))return; touchStartX=e.touches[0].pageX; touchStartY=e.touches[0].pageY; touchStartScrollLeft=tnCont.scrollLeft; isDraggingThumbnails=true; scrollAnimationStartTime=null},{passive:false}); slideBar.addEventListener('touchmove',(e)=>{if(!isDraggingThumbnails)return; const touchX=e.touches[0].pageX; const touchY=e.touches[0].pageY; const xDiff=touchX-touchStartX; const yDiff=touchY-touchStartY; if(Math.abs(xDiff)>Math.abs(yDiff)){targetScrollLeft=touchStartScrollLeft-xDiff; const maxS=tnCont.scrollWidth-tnCont.clientWidth; targetScrollLeft=Math.max(0,Math.min(maxS,targetScrollLeft)); tnCont.scrollLeft=targetScrollLeft; currentScrollLeft=targetScrollLeft; updateScrollIndicator(); e.preventDefault()}else if(yDiff<-20&&!slideBarVisible){toggleSlideBar(true,false)}else if(yDiff>20&&slideBarVisible&&!slideBarPinned){toggleSlideBar(false,false)}},{passive:false}); slideBar.addEventListener('touchend',()=>{if(isDraggingThumbnails)isDraggingThumbnails=false}); slideBar.addEventListener('wheel',(e)=>{e.preventDefault(); const scrollAmt=e.deltaY*1; targetScrollLeft=tnCont.scrollLeft+scrollAmt; const maxS=tnCont.scrollWidth-tnCont.clientWidth; targetScrollLeft=Math.max(0,Math.min(maxS,targetScrollLeft)); scrollStartPosition=tnCont.scrollLeft; scrollAnimationStartTime=performance.now(); if(!slideBarVisible&&!slideBarPinned)toggleSlideBar(true,false)},{passive:false}); scrInd.addEventListener('click',(e)=>{if(isDraggingScrollIndicator)return; const contW=scrInd.offsetWidth; const clickX=e.clientX-scrInd.getBoundingClientRect().left; const perc=clickX/contW; const maxS=tnCont.scrollWidth-tnCont.clientWidth; targetScrollLeft=maxS*perc; targetScrollLeft=Math.max(0,Math.min(maxS,targetScrollLeft)); scrollStartPosition=tnCont.scrollLeft; scrollAnimationStartTime=performance.now()}); fsBtn.addEventListener('click',(e)=>{e.stopPropagation();toggleFullscreen()}); }
+        function toggleSlideBar(show, pin) { const slideBar=document.getElementById('slideBar'); const slideArrow=document.getElementById('slideArrow'); const controlBar=document.getElementById('controlBar'); const vcActorContainer=document.getElementById('vcActorContainer'); if(!slideBar||!slideArrow||!controlBar) return; slideBarVisible=show; if(pin!==undefined) slideBarPinned=pin; slideBar.classList.toggle('visible',show); slideArrow.classList.toggle('down',show); if(show){controlBar.classList.add('slide-up'); if(vcActorContainer&&vcActorContainer.classList.contains('visible')&&!isDraggingVc){vcActorContainer.style.bottom='170px'}}else{controlBar.classList.remove('slide-up'); if(vcActorContainer&&vcActorContainer.classList.contains('visible')&&!isDraggingVc){const currentRight=vcActorContainer.style.right||'20px'; vcActorContainer.style.right=currentRight; vcActorContainer.style.bottom='20px'}}}
+        function toggleCategoryList(show) { const categoryList = document.getElementById('categoryList'); if (!categoryList || show === categoryListVisible) return; categoryListVisible = show; if (!show) { categoryList.classList.remove('visible'); setTimeout(() => { if (!categoryListVisible) categoryList.style.display = 'none'; }, 300); } else { categoryList.style.display = 'flex'; void categoryList.offsetWidth; categoryList.classList.add('visible'); } }
+        function animateScroll(timestamp) { const tnCont=document.getElementById('thumbnailContainer'); if(!tnCont){requestAnimationFrame(animateScroll); return} if(scrollAnimationStartTime===null){currentScrollLeft=tnCont.scrollLeft; updateScrollIndicator(); requestAnimationFrame(animateScroll); return} const elapsed=timestamp-scrollAnimationStartTime; const progress=Math.min(elapsed/scrollAnimationDuration,1); const easedProgress=ease(progress); currentScrollLeft=scrollStartPosition+(targetScrollLeft-scrollStartPosition)*easedProgress; const maxS=tnCont.scrollWidth-tnCont.clientWidth; currentScrollLeft=Math.max(0,Math.min(maxS,currentScrollLeft)); tnCont.scrollLeft=currentScrollLeft; updateScrollIndicator(); if(progress<1){requestAnimationFrame(animateScroll)}else{scrollAnimationStartTime=null; requestAnimationFrame(animateScroll)}}
+        function updateScrollIndicator() { const cont=document.getElementById('thumbnailContainer'); const prog=document.getElementById('scrollProgress'); const ind=document.getElementById('scrollIndicator'); if(!cont||!prog||!ind)return; const scrollW=cont.scrollWidth; const clientW=cont.clientWidth; const maxS=scrollW-clientW; if(maxS>0){ind.style.display='block'; const perc=maxS>0?(currentScrollLeft/maxS)*100:0; prog.style.width=`${Math.min(100,Math.max(3,perc))}%`} else {ind.style.display='none'; prog.style.width='0%'}}
+        function updateSlideCounter() { const slideCounter = document.getElementById('slideCounter'); if (slideCounter) { const total = filteredScenes.length; const current = total > 0 && currentSceneIndex >= 0 ? currentSceneIndex + 1 : 0; slideCounter.textContent = `${current} / ${total}`; } }
+        function updateActiveThumbnail(sceneId) { const thumbnails = document.querySelectorAll('.thumbnail'); thumbnails.forEach(thumb => { const isActive = thumb.dataset.sceneId === sceneId; thumb.classList.toggle('active', isActive); if (isActive) { const container = document.getElementById('thumbnailContainer'); if (container) { const thumbRect = thumb.getBoundingClientRect(); const containerRect = container.getBoundingClientRect(); targetScrollLeft = thumb.offsetLeft - (containerRect.width / 2) + (thumbRect.width / 2); const maxScroll = container.scrollWidth - container.clientWidth; targetScrollLeft = Math.max(0, Math.min(maxScroll, targetScrollLeft)); scrollStartPosition = container.scrollLeft; scrollAnimationStartTime = performance.now(); } } }); updateSlideCounter(); }
+        function toggleFullscreen() { const fsBtn=document.getElementById('fullscreenBtn'); if(!fsBtn)return; const isFull=document.fullscreenElement||document.webkitFullscreenElement||document.mozFullScreenElement||document.msFullscreenElement; if(!isFull){const el=document.documentElement; const req=el.requestFullscreen||el.webkitRequestFullscreen||el.mozRequestFullScreen||el.msRequestFullscreen; if(req){req.call(el).catch(err=>{})}else{}}else{const exit=document.exitFullscreen||document.webkitExitFullscreen||document.mozCancelFullScreen||document.msExitFullscreen; if(exit){exit.call(document).catch(err=>{})}else{}}}
+        function adjustViewerSize() { if (viewer) { setTimeout(() => { if (viewer) { viewer.resize(); } }, 50); } }
+        function setupAudioControls() { const playBtn=document.getElementById('playBtn'); const bgmToggle=document.getElementById('bgmToggle'); const vcToggle=document.getElementById('vcToggle'); if(!playBtn||!bgmToggle||!vcToggle) return; bgmToggle.classList.toggle('active',isBgmOn); vcToggle.classList.toggle('active',isVcOn); playBtn.classList.toggle('paused',isAudioPlaying); playBtn.addEventListener('click',(e)=>{e.stopPropagation();e.preventDefault();hasInteracted=true;toggleAudioPlayback()}); bgmToggle.addEventListener('click',(e)=>{e.stopPropagation();e.preventDefault();hasInteracted=true;isBgmOn=!isBgmOn;bgmToggle.classList.toggle('active',isBgmOn); const sceneId=viewer?.getScene(); if(!sceneId)return; const scene=filteredScenes.find(s=>s.id===sceneId); if(!scene)return; if(isBgmOn&&scene.bgmActive&&isAudioPlaying&&bgmAudio.src){fadeIn(bgmAudio,1)}else{fadeOut(bgmAudio)}}); vcToggle.addEventListener('click',(e)=>{e.stopPropagation();e.preventDefault();hasInteracted=true;isVcOn=!isVcOn;vcToggle.classList.toggle('active',isVcOn); const sceneId=viewer?.getScene(); if(!sceneId)return; const scene=filteredScenes.find(s=>s.id===sceneId); if(!scene)return; if(isVcOn&&scene.vcActive&&isAudioPlaying){if(vcAudio.src){fadeIn(vcAudio,1);manageDucking()}else if(ttsUtterance&&ttsUtterance.text){playTTS(ttsUtterance.text)}}else{fadeOut(vcAudio); if(ttsUtterance)window.speechSynthesis.cancel(); isTTSPlaying=false; if(isBgmOn&&scene.bgmActive&&bgmAudio.src&&!bgmAudio.paused){fadeIn(bgmAudio,1)}}}); bgmAudio.addEventListener('canplay',()=>{}); vcAudio.addEventListener('canplay',()=>{}); bgmAudio.addEventListener('error',(e)=>{}); vcAudio.addEventListener('error',(e)=>{}); bgmAudio.addEventListener('play',()=>{}); vcAudio.addEventListener('play',()=>{manageDucking()}); bgmAudio.addEventListener('pause',()=>{}); vcAudio.addEventListener('pause',()=>{}); vcAudio.addEventListener('ended',()=>{const sceneId=viewer?.getScene(); if(!sceneId)return; const scene=filteredScenes.find(s=>s.id===sceneId); if(scene&&isBgmOn&&scene.bgmActive&&bgmAudio.src&&!bgmAudio.paused){fadeIn(bgmAudio,1,bgmAudio.volume)}}); window.speechSynthesis.onvoiceschanged=()=>{const sceneId=viewer?.getScene(); if(!sceneId)return; const scene=filteredScenes.find(s=>s.id===sceneId); if(scene&&ttsUtterance&&!isTTSPlaying&&isVcOn&&scene.vcActive&&isAudioPlaying){playTTS(ttsUtterance.text)}}; window.speechSynthesis.getVoices();}
+        function toggleAudioPlayback() { const playBtn=document.getElementById('playBtn'); if(!playBtn)return; isAudioPlaying=!isAudioPlaying; playBtn.classList.toggle('paused',isAudioPlaying); const sceneId=viewer?.getScene(); if(!sceneId)return; const scene=filteredScenes.find(s=>s.id===sceneId); if(!scene)return; if(isAudioPlaying){isAutoPlayEnabled=true; if(isBgmOn&&scene.bgmActive&&bgmAudio.src){fadeIn(bgmAudio,1)} if(isVcOn&&scene.vcActive){if(vcAudio.src){fadeIn(vcAudio,1);manageDucking()}else if(ttsUtterance&&ttsUtterance.text){playTTS(ttsUtterance.text)}}}else{isAutoPlayEnabled=false; fadeOut(bgmAudio); fadeOut(vcAudio); if(ttsUtterance){window.speechSynthesis.cancel(); isTTSPlaying=false}}}
+        function fadeIn(audio, targetVolume, startVolume = 0) { if (!audio || (!audio.paused && audio.volume >= targetVolume)) return; clearInterval(audio.fadeInterval); audio.volume = startVolume; function startFadeInterval() { if (audio.paused && startVolume === 0) { clearInterval(audio.fadeInterval); return; } const fadeDuration = 1000; const steps = 50; const stepDuration = fadeDuration / steps; const volumeStep = (targetVolume - audio.volume) / steps; audio.fadeInterval = setInterval(() => { if (audio.paused) { clearInterval(audio.fadeInterval); return; } let newVolume = audio.volume + volumeStep; if ((volumeStep > 0 && newVolume >= targetVolume) || (volumeStep < 0 && newVolume <= targetVolume)) { audio.volume = targetVolume; clearInterval(audio.fadeInterval); } else { audio.volume = newVolume; } }, stepDuration); } if (audio.paused) { audio.play().then(startFadeInterval).catch(err => { clearInterval(audio.fadeInterval); }); } else { startFadeInterval(); } }
+        function fadeOut(audio) { if (!audio || !audio.src || audio.paused) return; clearInterval(audio.fadeInterval); const fadeDuration = 500; const steps = 25; const stepDuration = fadeDuration / steps; const startVolume = audio.volume; const initialVolume = (typeof startVolume === 'number' && !isNaN(startVolume) && startVolume > 0) ? startVolume : 1; const volumeStep = initialVolume / steps; audio.fadeInterval = setInterval(() => { if (audio.paused) { clearInterval(audio.fadeInterval); audio.volume = 0; return; } let newVolume = audio.volume - volumeStep; if (newVolume <= 0) { audio.pause(); audio.volume = 0; clearInterval(audio.fadeInterval); } else { audio.volume = newVolume; } }, stepDuration); }
+        function manageDucking() { const sceneId=viewer?.getScene(); if(!sceneId)return; const scene=filteredScenes.find(s=>s.id===sceneId); if(!scene)return; const shouldDuck=isBgmOn&&scene.bgmActive&&!bgmAudio.paused&&bgmAudio.volume>0&&isVcOn&&scene.vcActive&&(isTTSPlaying||!vcAudio.paused); if(shouldDuck){clearInterval(bgmAudio.fadeInterval); const targetVolume=0.3; if(bgmAudio.volume<=targetVolume)return; const fadeDuration=500; const steps=25; const stepDuration=fadeDuration/steps; const volumeStep=(bgmAudio.volume-targetVolume)/steps; bgmAudio.fadeInterval=setInterval(()=>{if(bgmAudio.paused){clearInterval(bgmAudio.fadeInterval);return} let newVolume=bgmAudio.volume-volumeStep; if(newVolume<=targetVolume){bgmAudio.volume=targetVolume; clearInterval(bgmAudio.fadeInterval)}else{bgmAudio.volume=newVolume}},stepDuration)}}
+        function playTTS(text) { if (!window.speechSynthesis) return; if (!text || typeof text !== 'string' || text.trim() === '') return; if (window.speechSynthesis.speaking || window.speechSynthesis.pending) { window.speechSynthesis.cancel(); setTimeout(() => proceedWithTTS(text), 100); } else { proceedWithTTS(text); } }
+        function proceedWithTTS(text) { if (window.speechSynthesis.speaking) return; ttsUtterance = new SpeechSynthesisUtterance(text); ttsUtterance.volume = 1; ttsUtterance.rate = 1; ttsUtterance.pitch = 1; const voices = window.speechSynthesis.getVoices(); let selectedVoice = null; if (voices.length > 0) { selectedVoice = voices.find(v => v.lang.startsWith('en') && v.localService) || voices.find(v => v.lang.startsWith('en')) || voices.find(v => v.localService) || voices[0]; ttsUtterance.voice = selectedVoice; } ttsUtterance.onstart = () => { isTTSPlaying = true; manageDucking(); }; ttsUtterance.onend = () => { isTTSPlaying = false; ttsUtterance = null; const sceneId = viewer?.getScene(); if (!sceneId) return; const scene = filteredScenes.find(s => s.id === sceneId); if (scene && isBgmOn && scene.bgmActive && bgmAudio.src && !bgmAudio.paused) { fadeIn(bgmAudio, 1, bgmAudio.volume); } }; ttsUtterance.onerror = (e) => { console.error('TTS Error:', e.error); isTTSPlaying = false; ttsUtterance = null; const sceneId = viewer?.getScene(); if (!sceneId) return; const scene = filteredScenes.find(s => s.id === sceneId); if (scene && isBgmOn && scene.bgmActive && bgmAudio.src && !bgmAudio.paused) { fadeIn(bgmAudio, 1, bgmAudio.volume); } }; ttsUtterance.onpause = () => { isTTSPlaying = false; }; ttsUtterance.onresume = () => { isTTSPlaying = true; }; window.speechSynthesis.speak(ttsUtterance); }
+        async function playSceneAudio(sceneId) { const scene=filteredScenes.find(s=>s.id===sceneId); if(!scene)return; if(!vcAudio.paused&&(!scene.vcActive||(vcAudio.src&&scene.vcUrl&&!vcAudio.src.endsWith(scene.vcUrl)))){fadeOut(vcAudio)}else if(!scene.vcActive&&!vcAudio.paused){fadeOut(vcAudio)}else if(!scene.vcActive){vcAudio.pause();vcAudio.src=''} if(ttsUtterance||window.speechSynthesis.speaking||window.speechSynthesis.pending){window.speechSynthesis.cancel();isTTSPlaying=false} vcAudio.currentTime=0; ttsUtterance=null; const currentBgmUrl=bgmAudio.src||''; const newBgmUrl=scene.bgmUrl||''; let bgmLoaded=false; if(scene.bgmActive&&newBgmUrl){if(currentBgmUrl.endsWith(newBgmUrl)&&!bgmAudio.paused){bgmLoaded=true; if(bgmAudio.volume<1)fadeIn(bgmAudio,1,bgmAudio.volume)}else{if(!bgmAudio.paused)fadeOut(bgmAudio); else bgmAudio.pause(); bgmAudio.currentTime=0; bgmLoaded=await loadAudio(bgmAudio,newBgmUrl,'BGM',true)}}else{fadeOut(bgmAudio);bgmAudio.src='';bgmLoaded=false} let vcLoaded=false; if(scene.vcActive){vcLoaded=await loadAudio(vcAudio,scene.vcUrl,'VC',true)}else{vcAudio.src='';ttsUtterance=null;vcLoaded=false} const vcCont=document.getElementById('vcActorContainer'),vcImg=document.getElementById('vcActorImage'),vcArr=document.getElementById('vcToggleArrow'); if(vcCont&&vcImg&&vcArr){if(scene.vcActive&&scene.vcActorAvatarUrl){vcImg.src=scene.vcActorAvatarUrl; vcCont.style.background=scene.vcActorBgColor; vcCont.classList.add('visible'); vcArr.classList.toggle('hidden',isVcHidden); vcCont.classList.toggle('minimized',isVcHidden); vcImg.onerror=()=>{vcCont.classList.remove('visible')}}else{vcCont.classList.remove('visible');vcImg.src=''}} const playBtn=document.getElementById('playBtn'); if(hasInteracted&&isAudioPlaying){if(bgmLoaded&&isBgmOn&&scene.bgmActive){if(bgmAudio.paused)fadeIn(bgmAudio,1)}else if(!scene.bgmActive&&!bgmAudio.paused){fadeOut(bgmAudio)} if(vcLoaded&&isVcOn&&scene.vcActive){if(ttsUtterance&&ttsUtterance.text){playTTS(ttsUtterance.text)}else if(vcAudio.src){if(vcAudio.paused)fadeIn(vcAudio,1); manageDucking()}}else if(!scene.vcActive&&(!vcAudio.paused||isTTSPlaying)){fadeOut(vcAudio); if(ttsUtterance||window.speechSynthesis.speaking)window.speechSynthesis.cancel(); isTTSPlaying=false; if(isBgmOn&&scene.bgmActive&&bgmAudio.src&&!bgmAudio.paused)fadeIn(bgmAudio,1)}}else{if(!isAudioPlaying&&playBtn)playBtn.classList.remove('paused'); if(!isAudioPlaying){if(!bgmAudio.paused)bgmAudio.pause(); if(!vcAudio.paused)vcAudio.pause(); if(isTTSPlaying)window.speechSynthesis.pause()}}}
+        async function loadAudio(audioEl, urlOrTxt, type, isActive) { if(!isActive){if(audioEl)audioEl.src='';if(type==='VC')ttsUtterance=null;return false} if(!urlOrTxt||typeof urlOrTxt!=='string'||urlOrTxt.trim()===''){if(audioEl)audioEl.src='';if(type==='VC')ttsUtterance=null;return false} const isUrl=urlOrTxt.match(/^(https?:\/\/|ftp:\/\/|data:|\/)/i)||/\.(mp3|wav|ogg|m4a)$/i.test(urlOrTxt); if(type==='VC'&&!isUrl){const txt=urlOrTxt.trim(); if(txt){ttsUtterance=new SpeechSynthesisUtterance(txt);if(audioEl)audioEl.src='';return true}else{ttsUtterance=null;return false}} if(!audioEl)return false; const curSrc=audioEl.src||''; if(curSrc.endsWith(urlOrTxt)){if(!audioEl.paused)return true;if(audioEl.readyState>=2)return true} audioEl.src=urlOrTxt; audioEl.load(); return new Promise((res)=>{let resolved=false; audioEl.oncanplay=null; audioEl.onerror=null; const ok=()=>{if(resolved)return; resolved=true; clearTimeout(to); res(true)}; const err=(e)=>{if(resolved)return; resolved=true; clearTimeout(to); audioEl.src=''; res(false)}; const to=setTimeout(()=>{if(resolved)return; resolved=true; audioEl.oncanplay=null; audioEl.onerror=null; audioEl.src=''; res(false)},15000); audioEl.oncanplay=ok; audioEl.onerror=err})}
+        function setupVcContainerInteractions() { const vcCont=document.getElementById('vcActorContainer'); const vcArr=document.getElementById('vcToggleArrow'); if(!vcCont||!vcArr)return; vcCont.addEventListener('mousedown',(e)=>{if(e.target===vcArr||vcArr.contains(e.target))return; isDraggingVc=true; vcStartX=e.pageX; vcStartY=e.pageY; const rect=vcCont.getBoundingClientRect(); vcOffsetX=window.innerWidth-rect.right; vcOffsetY=window.innerHeight-rect.bottom; document.body.style.cursor='grabbing'; e.preventDefault()}); vcCont.addEventListener('touchstart',(e)=>{if(e.target===vcArr||vcArr.contains(e.target))return; if(e.touches.length===1){isDraggingVc=true; vcStartX=e.touches[0].pageX; vcStartY=e.touches[0].pageY; const rect=vcCont.getBoundingClientRect(); vcOffsetX=window.innerWidth-rect.right; vcOffsetY=window.innerHeight-rect.bottom; e.preventDefault()}},{passive:false}); vcArr.addEventListener('click',(e)=>{e.stopPropagation();isVcHidden=!isVcHidden; vcArr.classList.toggle('hidden',isVcHidden); vcCont.classList.toggle('minimized',isVcHidden)})}
+        function startTypingAnimation() { const descTxt=document.getElementById('descriptionText'); if(!descTxt||descriptionSentences.length===0)return; let sentIdx=0; let charIdx=0; let isDel=false; const prefix="Brand "; descTxt.textContent=prefix; function type(){if(!welcomeOverlayVisible)return; const curSent=descriptionSentences[sentIdx]; let dispTxt=prefix+curSent.substring(0,charIdx); descTxt.textContent=dispTxt; if(!isDel&&charIdx<curSent.length){charIdx++;setTimeout(type,typingSpeed)}else if(isDel&&charIdx>0){charIdx--;setTimeout(type,eraseSpeed)}else if(!isDel&&charIdx===curSent.length){isDel=true;setTimeout(type,delayBetweenSentences)}else if(isDel&&charIdx===0){isDel=false;sentIdx=(sentIdx+1)%descriptionSentences.length;setTimeout(type,typingSpeed/2)}} setTimeout(type,typingSpeed)}
+
+        // --- START: Custom Hover Card Creation (Applies to ALL Sheet 2 Hotspots) ---
+        function createCustomHoverCard(hotSpotDiv, args) { // Renamed function for clarity
+            console.log("[DEBUG] createCustomHoverCard called with args:", args);
+
+            const card = document.createElement('div');
+            card.className = 'custom-hover-card pnlm-tooltip'; // Use updated class name
+            let hasContent = false;
+
+            // Image (Column M)
+            const imageUrl = args.imageUrl && typeof args.imageUrl === 'string' ? args.imageUrl.trim() : null;
+            if (imageUrl && imageUrl.toLowerCase() !== 'false' && imageUrl !== '') {
+                console.log("[DEBUG] Adding Image:", imageUrl);
+                const img = document.createElement('img');
+                img.src = imageUrl;
+                img.alt = args.title || 'Product Image';
+                img.className = 'card-image';
+                img.onerror = () => { img.style.display = 'none'; console.warn('[DEBUG] Failed card image:', imageUrl); };
+                card.appendChild(img);
+                hasContent = true;
+            } else {
+                console.log("[DEBUG] Skipping Image (no valid URL)");
+            }
+
+            // Header Div (for Title and Price)
+            const headerDiv = document.createElement('div');
+            headerDiv.className = 'card-header';
+            let headerHasContent = false;
+
+            // Title (Column N)
+            const titleText = args.title && typeof args.title === 'string' ? args.title.trim() : null;
+            if (titleText && titleText !== '') {
+                console.log("[DEBUG] Adding Title:", titleText);
+                const title = document.createElement('h3');
+                title.className = 'card-title';
+                title.textContent = titleText;
+                headerDiv.appendChild(title);
+                headerHasContent = true;
+            } else {
+                console.log("[DEBUG] Skipping Title (empty)");
+            }
+
+            // Price Section (Columns P and Q)
+            const symbolData = args.currencySymbol && typeof args.currencySymbol === 'string' ? args.currencySymbol.trim() : null;
+            const priceVal = args.priceValue && typeof args.priceValue === 'string' ? args.priceValue.trim() : null;
+
+            if (symbolData && symbolData.toLowerCase() !== 'false' && symbolData !== '' && priceVal && priceVal !== '') {
+                console.log("[DEBUG] Adding Price Section: Symbol=", symbolData, "Price=", priceVal);
+                const priceSection = document.createElement('div');
+                priceSection.className = 'card-price-section';
+                const looksLikeUrl = /^(https?:\/\/|ftp:\/\/|data:|\/)/i.test(symbolData) || /\.(jpg|jpeg|png|gif|svg|webp)$/i.test(symbolData);
+
+                if (looksLikeUrl) {
+                    console.log("[DEBUG]   Symbol is URL:", symbolData);
+                    const currencyImg = document.createElement('img');
+                    currencyImg.src = symbolData;
+                    currencyImg.alt = '';
+                    currencyImg.className = 'currency-symbol-img';
+                    currencyImg.onerror = () => { currencyImg.style.display = 'none'; console.warn('[DEBUG] Failed currency image:', symbolData); };
+                    priceSection.appendChild(currencyImg);
+                } else {
+                    console.log("[DEBUG]   Symbol is Text:", symbolData);
+                    const currencyText = document.createElement('span');
+                    currencyText.className = 'currency-symbol-text';
+                    currencyText.textContent = symbolData;
+                    priceSection.appendChild(currencyText);
+                }
+
+                const priceValueSpan = document.createElement('span');
+                priceValueSpan.className = 'price-value';
+                priceValueSpan.textContent = priceVal;
+                priceSection.appendChild(priceValueSpan);
+
+                headerDiv.appendChild(priceSection); // Add price to header
+                headerHasContent = true;
+            } else {
+                 console.log("[DEBUG] Skipping Price Section (Symbol or Price empty/invalid)");
+            }
+
+            // Append header only if it has content
+            if (headerHasContent) {
+                card.appendChild(headerDiv);
+                hasContent = true;
+            }
+
+            // Description (Column O) - Appended after header
+            const descriptionText = args.description && typeof args.description === 'string' ? args.description.trim() : null;
+            if (descriptionText && descriptionText !== '') {
+                console.log("[DEBUG] Adding Description:", descriptionText.substring(0, 50) + "...");
+                const description = document.createElement('p');
+                description.className = 'card-description';
+                description.textContent = descriptionText;
+                card.appendChild(description); // Append directly to card, below header
+                hasContent = true;
+            } else {
+                console.log("[DEBUG] Skipping Description (empty)");
+            }
+
+
+            // Return null if no content was added at all
+            if (!hasContent) {
+                 console.warn("[DEBUG] Custom hover card is empty, returning null. Args:", args);
+                 return null; // Prevent empty tooltip box
+            }
+
+            console.log("[DEBUG] createCustomHoverCard finished, returning card element:", card);
+            return card;
+        }
+        // --- END: Custom Hover Card Creation ---
+
+
+        // --- Original Hover/Docked Card Logic ---
+        function updateCardContent(scene) { const card=document.getElementById('hoverCard'),img=document.getElementById('hoverCardImage'),txt=document.getElementById('hoverCardText'); if(!card||!img||!txt||!scene)return; const url=scene.cardUrl?String(scene.cardUrl).trim():''; if(url&&url.toLowerCase()!=='false'){img.src=url; img.style.display='block'; img.onerror=()=>{img.style.display='none'}}else{img.src=''; img.style.display='none'} const desc=scene.floorMapDetails?String(scene.floorMapDetails).trim():''; txt.textContent=desc; }
+        function showHoverCard(sceneToShow, isHover = false, targetElement = null, isCategoryHover = false) { const card=document.getElementById('hoverCard'); if(!card||!sceneToShow)return; if(currentCard&&currentCard!==card&&!currentCard.classList.contains('docked-card')){hideHoverCard(currentCard)} updateCardContent(sceneToShow); card.classList.remove('docked-card','category-hover-card','pinned','visible'); card.style.left=''; card.style.top=''; card.style.bottom=''; card.style.transform=''; card.style.width=''; card.style.height=''; card.style.opacity=''; card.style.justifyContent=''; card.style.position=''; if(isCategoryHover){card.classList.add('category-hover-card')} let top,left,bottom='auto',transform='none',width='300px',height='300px'; if(targetElement){const targetRect=targetElement.getBoundingClientRect(); const cardW=300; const cardH=300; const margin=10; if(isCategoryHover){left=`${targetRect.right+margin}px`; top='auto'; bottom=`${window.innerHeight-targetRect.bottom}px`}else{let cL=targetRect.right+margin; let cT=targetRect.bottom+margin; if(cL+cardW>window.innerWidth){cL=targetRect.left-cardW-margin} if(cT+cardH>window.innerHeight){cT=targetRect.top-cardH-margin} if(cL<0)cL=margin; if(cT<0)cT=margin; left=`${cL}px`; top=`${cT}px`; bottom='auto'} width=`${cardW}px`; height=`${cardH}px`}else{left='50%'; top='50%'; transform='translate(-50%, -50%)'; width='400px'; height='400px'} card.style.position='absolute'; card.style.left=left; card.style.top=top; card.style.bottom=bottom; card.style.transform=transform; card.style.width=width; card.style.height=height; card.classList.add('visible'); cardWasPinnedByClick=false; if(!isHover&&!isCategoryHover){card.classList.add('pinned'); cardWasPinnedByClick=true} currentCard=card; card.removeEventListener('click',stopPropagation); card.addEventListener('click',stopPropagation); setupCardButtons(card,sceneToShow); card.removeEventListener('mouseenter',handleCardMouseEnter); card.removeEventListener('mouseleave',handleCardMouseLeave); card.addEventListener('mouseenter',handleCardMouseEnter); card.addEventListener('mouseleave',handleCardMouseLeave); }
+        function stopPropagation(e) { e.stopPropagation(); }
+        function setupCardButtons(card, scene) { const closeBtn=card.querySelector('.close-btn'); const dockBtn=card.querySelector('.dock-btn'); if(!closeBtn||!dockBtn)return; const newCloseBtn=closeBtn.cloneNode(true); const newDockBtn=dockBtn.cloneNode(true); closeBtn.parentNode.replaceChild(newCloseBtn,closeBtn); dockBtn.parentNode.replaceChild(newDockBtn,dockBtn); newCloseBtn.addEventListener('click',(e)=>{e.stopPropagation();hideHoverCard(card)}); newDockBtn.addEventListener('click',(e)=>{e.stopPropagation(); card.classList.remove('pinned','category-hover-card','visible'); card.classList.add('docked-card'); card.style.left=''; card.style.top=''; card.style.bottom=''; card.style.transform=''; card.style.width=''; card.style.height=''; card.style.opacity=''; card.style.justifyContent=''; card.style.position=''; updateDockedElements()}); }
+        function handleCardMouseEnter() { if(hoverTimeout)clearTimeout(hoverTimeout); if(currentCard&&!currentCard.classList.contains('docked-card')){currentCard.style.opacity='1'; if(!cardWasPinnedByClick){currentCard.classList.add('pinned')}}}
+        function handleCardMouseLeave() { if(currentCard&&!currentCard.classList.contains('docked-card')){currentCard.style.opacity=''; if(!cardWasPinnedByClick){currentCard.classList.remove('pinned')} hoverTimeout=setTimeout(()=>{if(currentCard&&!currentCard.matches(':hover')&&!currentCard.classList.contains('docked-card')&&!cardWasPinnedByClick){hideHoverCard(currentCard)}},300)}}
+        function hideHoverCard(cardToHide = null) { const card = cardToHide || currentCard; if (!card || card.id !== 'hoverCard') return; const wasDocked = card.classList.contains('docked-card'); card.classList.remove('visible', 'pinned', 'docked-card', 'category-hover-card'); if (currentCard === card) currentCard = null; if (hoverTimeout) { clearTimeout(hoverTimeout); hoverTimeout = null; } cardWasPinnedByClick = false; if (wasDocked) updateDockedElements(); const image = card.querySelector('#hoverCardImage'); const textElement = card.querySelector('#hoverCardText'); if (image) { image.style.display = ''; image.src = ''; image.onerror = null; } if (textElement) { textElement.textContent = ''; textElement.style.display = ''; } setTimeout(() => { if (card && !card.classList.contains('visible')) { card.style.left = ''; card.style.top = ''; card.style.bottom = ''; card.style.transform = ''; card.style.width = ''; card.style.height = ''; card.style.position = ''; card.style.justifyContent = ''; card.style.opacity = ''; } }, 350); }
+        function updateDockedElements() { const ctrlBar=document.getElementById('controlBar'); const sldBar=document.getElementById('slideBar'); const isDocked=currentCard&&currentCard.classList.contains('docked-card'); if(ctrlBar)ctrlBar.classList.toggle('docked',isDocked); if(sldBar)sldBar.classList.toggle('docked',isDocked); adjustViewerSize(); }
+        function updateYellowHotspotTooltip() { const yHotspot=document.getElementById('yellowHotspot'); const yTooltip=yHotspot?.querySelector('.hotspot-tooltip'); const scene=(filteredScenes&&currentSceneIndex>=0&&currentSceneIndex<filteredScenes.length)?filteredScenes[currentSceneIndex]:null; if(viewer&&yHotspot&&yTooltip&&scene&&scene.getPitchYaw===true){const pitch=viewer.getPitch().toFixed(2); const yaw=viewer.getYaw().toFixed(2); yTooltip.textContent=`Pitch: ${pitch}, Yaw: ${yaw}`; yHotspot.style.display='block'}else if(yHotspot){yHotspot.style.display='none'}}
+        function handleInfoHotspotClick(hotSpotDiv, args) { const sceneId=args?.sceneId; const showCardFlag=args?.showCard; if(!sceneId){console.error("No sceneId in args."); return} const scene=filteredScenes.find(s=>s.id===sceneId); if(scene&&showCardFlag===true){showHoverCard(scene,false,hotSpotDiv,false)}else{if(currentCard&&!currentCard.classList.contains('docked-card')){hideHoverCard()}}}
+
+        // --- Initial Setup ---
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log("[DEBUG] DOMContentLoaded event fired.");
+            window.addEventListener('resize', adjustViewerSize);
+            const handleFullscreenChange = () => { const btn=document.getElementById('fullscreenBtn'); const isFull=!!(document.fullscreenElement||document.webkitFullscreenElement||document.mozFullScreenElement||document.msFullscreenElement); if(btn)btn.classList.toggle('active',isFull); adjustViewerSize(); };
+            document.addEventListener('fullscreenchange', handleFullscreenChange); document.addEventListener('webkitfullscreenchange', handleFullscreenChange); document.addEventListener('mozfullscreenchange', handleFullscreenChange); document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+            loadTourData(); // Load tour data
+        });
+
+    </script>
+</body>
+</html>

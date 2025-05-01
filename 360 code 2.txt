@@ -1,0 +1,2604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>360° Virtual Tour</title>
+    <link rel="stylesheet" href="https://cdn.pannellum.org/2.5/pannellum.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdn.pannellum.org/2.5/pannellum.js"></script>
+    <style>
+        /* Basic page setup */
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden; /* Prevent scrollbars on the body */
+            font-family: Arial, sans-serif;
+            user-select: none; /* Disable text selection */
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+        }
+        /* Panorama container */
+        #panorama {
+            position: absolute;
+            top: 0;
+            left: 0; /* Start at left edge */
+            width: 100%; /* Start full width */
+            height: 100vh; /* Full viewport height */
+            transition: width 0.3s ease, left 0.3s ease; /* Add transition for width and left changes */
+        }
+        /* Adjust panorama width when right card is visible */
+        body.right-card-visible #panorama {
+            width: calc(100% - 320px); /* Adjust width based on card width + margin */
+        }
+         /* Adjust panorama width when left card is visible */
+        body.left-card-visible #panorama {
+            width: calc(100% - 300px); /* Adjust width based on card width */
+            left: 300px; /* Shift panorama right */
+        }
+        /* Adjust panorama width when both cards are visible */
+        body.left-card-visible.right-card-visible #panorama {
+            width: calc(100% - 300px - 320px);
+            left: 300px;
+        }
+
+        /* Loading overlay */
+        #loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-size: 24px;
+            z-index: 2100; /* Ensure it's above other elements */
+        }
+        /* Logo styling */
+        .logo-img {
+            position: fixed;
+            width: 50px;
+            height: auto;
+            z-index: 1000;
+            transition: right 0.3s ease;
+        }
+        .logo-tr { top: 20px; right: 20px; } /* Top-right position */
+
+        /* Slide bar (thumbnail container) */
+        .slide-bar {
+            position: fixed;
+            bottom: -145px; /* Initially hidden below the screen */
+            left: 0; /* Default left */
+            right: 0; /* Default right */
+            height: 160px;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            z-index: 1000;
+            transition: bottom 0.3s ease, left 0.3s ease, width 0.3s ease, right 0.3s ease; /* Added right transition */
+            border-top: 2px solid rgba(255,255,255,0); /* Subtle top border */
+            box-shadow: 0 -5px 15px rgba(0,0,0,0.5); /* Top shadow */
+        }
+        /* Style for when the slide bar is visible */
+        .slide-bar.visible {
+            bottom: 0;
+        }
+        /* Style for when the slide bar is docked (left side) */
+        .slide-bar.docked { /* When left card is docked */
+            left: 300px; /* Move right by card width */
+            width: calc(100% - 300px); /* Reduce width */
+            right: auto; /* Unset right */
+        }
+        /* Adjust slide bar width/position when right card is visible */
+        body.right-card-visible .slide-bar:not(.docked) {
+            width: calc(100% - 320px); /* Adjust width */
+            right: 320px; /* Keep it from going under the right card */
+        }
+        /* Adjust slide bar width/position when both cards are visible */
+        body.right-card-visible .slide-bar.docked {
+             width: calc(100% - 300px - 320px); /* Adjust width when both cards are potentially visible */
+             left: 300px; /* Keep left position */
+             right: auto; /* Ensure right is unset */
+        }
+
+        /* Content within the slide bar */
+        .slide-bar-content {
+            display: flex;
+            flex-direction: column;
+            flex-grow: 1;
+            padding: 5px 15px;
+            position: relative;
+        }
+        /* Category name display */
+        .category-name {
+            color: white;
+            font-size: 16px;
+            padding: 5px 0;
+            margin-bottom: 5px;
+            font-weight: bold;
+            text-align: left;
+            position: relative;
+        }
+        /* Container for thumbnails */
+        .thumbnail-container {
+            display: flex;
+            overflow-x: auto; /* Enable horizontal scrolling */
+            scroll-behavior: smooth; /* Smooth scrolling */
+            flex-grow: 1;
+            align-items: center;
+            -ms-overflow-style: none;  /* Hide scrollbar IE and Edge */
+            scrollbar-width: none;  /* Hide scrollbar Firefox */
+            padding-bottom: 5px;
+        }
+        /* Hide scrollbar for Chrome, Safari, Opera */
+        .thumbnail-container::-webkit-scrollbar {
+            display: none;
+        }
+        /* Individual thumbnail style */
+        .thumbnail {
+            position: relative;
+            height: 90px;
+            width: 120px;
+            margin-right: 10px;
+            cursor: pointer;
+            border: 3px solid transparent; /* Border for active state */
+            transition: all 0.3s ease;
+            flex-shrink: 0; /* Prevent thumbnails from shrinking */
+            overflow: hidden;
+            border-radius: 5px;
+            background: rgba(255,255,255,0.1); /* Slight background */
+        }
+        .thumbnail img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover; /* Ensure image covers the thumbnail */
+            object-position: center;
+            transition: transform 0.3s ease;
+        }
+        /* Style for the currently active thumbnail */
+        .thumbnail.active {
+            border: 3px solid #fff;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+            transform: translateY(-5px); /* Lift effect */
+        }
+        /* Hover effect for thumbnails */
+        .thumbnail:hover {
+            border: 3px solid rgba(255,255,255,0.7);
+            transform: translateY(-5px);
+        }
+        .thumbnail:hover img {
+            transform: scale(1.05); /* Slight zoom on hover */
+        }
+        /* Thumbnail name overlay */
+        .thumbnail-name {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            color: white;
+            font-size: 12px;
+            padding: 5px;
+            text-align: center;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis; /* Show ellipsis for long names */
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.7); /* Optional: Add text shadow for readability */
+        }
+        /* Scroll indicator bar */
+        .scroll-indicator {
+            position: relative;
+            height: 3px;
+            background: rgba(255,255,255,0.2);
+            width: 100%;
+            margin-top: 5px;
+            margin-bottom: 20px;
+            cursor: pointer;
+        }
+        /* Progress part of the scroll indicator */
+        .scroll-progress {
+            height: 200%; /* Make it slightly thicker than the track */
+            background: #4CAF50; /* Green progress color */
+            transition: width 0.1s; /* Smooth width change */
+            border-radius: 5px;
+            width: 3%; /* Minimum width */
+        }
+        /* Main control bar at the bottom left */
+        .control-bar {
+            position: fixed;
+            bottom: 20px;
+            left: 10px; /* Default left position */
+            display: flex;
+            align-items: center;
+            z-index: 1000;
+            transition: bottom 0.3s ease, left 0.3s ease; /* Smooth transitions for bottom and left */
+        }
+        /* Style for when the control bar moves up with the slide bar */
+        .control-bar.slide-up {
+            bottom: 170px;
+        }
+        /* Style for when the control bar is docked (shifted right by left card) */
+        .control-bar.docked {
+             left: calc(10px + 300px); /* Move left relative to the docked card */
+        }
+        /* Arrow button to toggle the slide bar */
+        .slide-arrow {
+            width: 30px;
+            height: 20px;
+            background: rgba(0,0,0,0.7);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s;
+            position: relative;
+        }
+        .slide-arrow::after {
+            content: "▲"; /* Up arrow */
+            color: white;
+            font-size: 12px;
+        }
+        /* Tooltip for the slide arrow */
+        .slide-arrow:hover::before {
+            content: "Expand";
+            position: absolute;
+            bottom: 25px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.9);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            white-space: nowrap;
+            z-index: 1001;
+        }
+        /* Style for when the arrow points down (slide bar visible) */
+        .slide-arrow.down::after {
+            content: "▼"; /* Down arrow */
+        }
+        .slide-arrow.down:hover::before {
+            content: "Hide"; /* Tooltip changes */
+        }
+        /* Category selection icon */
+        .category-icon {
+            width: 30px;
+            height: 20px;
+            background: rgba(0,0,0,0.7);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-left: 5px;
+            transition: all 0.3s;
+            position: relative;
+        }
+        .category-icon::after {
+            content: "≡"; /* Hamburger icon */
+            color: white;
+            font-size: 16px;
+        }
+        /* Tooltip for category icon */
+        .category-icon:hover::before {
+            content: "Select Floor";
+            position: absolute;
+            bottom: 25px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.9);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            white-space: nowrap;
+        }
+        /* Fullscreen toggle button */
+        .fullscreen-btn {
+            width: 30px;
+            height: 20px;
+            background: rgba(0,0,0,0.7);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-left: 5px;
+            transition: all 0.3s;
+            position: relative;
+        }
+        .fullscreen-btn::after {
+            content: "⛶"; /* Fullscreen icon */
+            color: white;
+            font-size: 14px;
+        }
+        /* Icon changes when in fullscreen */
+        .fullscreen-btn.active::after {
+            content: "🛗"; /* Exit fullscreen icon (using elevator symbol creatively) */
+        }
+        /* Tooltip for fullscreen button */
+        .fullscreen-btn:hover::before {
+            content: "Toggle Fullscreen";
+            position: absolute;
+            bottom: 25px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.9);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            white-space: nowrap;
+        }
+        /* Pop-up list for categories */
+        .category-list {
+            position: absolute;
+            bottom: 25px; /* Position above the category icon */
+            left: 0;
+            background: rgba(0,0,0,0.9);
+            border-radius: 5px 5px 0 0; /* Rounded top corners */
+            overflow: hidden;
+            width: 110px;
+            max-height: 0; /* Initially hidden */
+            transition: max-height 0.3s ease; /* Smooth reveal */
+            box-shadow: 0 -5px 15px rgba(0,0,0,0.5);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+        }
+        /* Style for when the category list is visible */
+        .category-list.visible {
+            max-height: 200px; /* Allow it to expand */
+            display: flex; /* Ensure display is flex when visible */
+        }
+        /* Individual category item */
+        .category-item {
+            padding: 8px 12px;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+            border-bottom: 1px solid rgba(255,255,255,0.1); /* Separator */
+        }
+        .category-item:last-child {
+            border-bottom: none;
+        }
+        .category-item:hover {
+            background: rgba(255,255,255,0.2); /* Highlight on hover */
+        }
+        /* Style for the currently selected category */
+        .category-item.active {
+            background: rgba(255,255,255,0.9);
+            color: black;
+        }
+        /* Slide counter display in the slide bar */
+        .slide-counter {
+            position: absolute;
+            top: 5px;
+            right: 15px;
+            width: 60px;
+            height: 20px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            border-radius: 3px;
+            z-index: 1001; /* Above thumbnails */
+        }
+        /* Fix for Pannellum z-index issue in fullscreen */
+        .pnlm-container:-webkit-full-screen {
+            z-index: 0 !important;
+        }
+        .pnlm-container:fullscreen {
+            z-index: 0 !important;
+        }
+        /* Hide default Pannellum title box */
+        .pnlm-title-box {
+            display: none !important;
+        }
+        /* General audio button styling */
+        .audio-btn {
+            height: 20px;
+            background: rgba(0,0,0,0.7);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-left: 5px;
+            transition: all 0.3s;
+            position: relative;
+            z-index: 1001; /* Ensure visibility */
+        }
+        /* Play/Pause button specific style */
+        .audio-btn.play {
+            width: 30px;
+            background: linear-gradient(135deg, rgba(0,0,0,0.7), rgba(50,50,50,0.9));
+            border-radius: 4px;
+        }
+        /* BGM and VC toggle button styles */
+        .audio-btn.bgm-toggle, .audio-btn.vc-toggle {
+            width: 70px; /* Wider to accommodate text */
+            background: linear-gradient(135deg, rgba(0,0,0,0.7), rgba(50,50,50,0.9));
+            border-radius: 4px;
+            font-size: 12px;
+            font-family: 'Arial Narrow', Arial, sans-serif;
+            padding: 0 5px;
+        }
+        /* Icon/Text content for audio buttons */
+        .audio-btn::after {
+            color: white;
+            font-size: 14px;
+            white-space: nowrap;
+        }
+        .audio-btn.play::after {
+            content: "▶"; /* Play icon */
+        }
+        .audio-btn.play.paused::after {
+            content: "⏸"; /* Pause icon */
+        }
+        .audio-btn.bgm-toggle::after {
+            content: "♪ BGM: OFF";
+        }
+        .audio-btn.bgm-toggle.active::after {
+            content: "♪ BGM: ON";
+        }
+        .audio-btn.vc-toggle::after {
+            content: "🎙 VC: OFF";
+        }
+        .audio-btn.vc-toggle.active::after {
+            content: "🎙 VC: ON";
+        }
+        /* Hover effect for audio buttons */
+        .audio-btn:hover {
+            transform: scale(1.05);
+            background: linear-gradient(135deg, rgba(50,50,50,0.9), rgba(100,100,100,0.9));
+        }
+        /* General tooltip setup for audio buttons */
+        .audio-btn:hover::before {
+            content: ""; /* Placeholder, content set below */
+            position: absolute;
+            bottom: 25px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.9);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            white-space: nowrap;
+            z-index: 1002; /* Above other elements */
+        }
+        /* Specific tooltips */
+        .audio-btn.play:hover::before {
+            content: "Play/Pause Audio";
+        }
+        .audio-btn.bgm-toggle:hover::before {
+            content: "Toggle Background Music";
+        }
+        .audio-btn.vc-toggle:hover::before {
+            content: "Toggle Voice Commentary";
+        }
+
+        /* --- Voice Commentary (VC) actor container (Sheet 1) --- */
+        .vc-actor-container {
+            position: fixed;
+            /* Default position set by JS, fallback */
+            bottom: 20px;
+            right: 20px;
+            visibility: hidden; /* Initially hidden */
+            opacity: 0; /* Start transparent */
+            padding: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 5px;
+            background: rgba(255, 255, 255, 0.1); /* Glassmorphism effect */
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.08);
+            z-index: 1001;
+            transition: bottom 0.3s ease, right 0.3s ease, opacity 0.3s ease, transform 0.3s ease, height 0.2s ease, visibility 0s linear 0.3s; /* Delay visibility hide */
+            width: 100px;
+            height: 133.33px; /* Default height */
+            max-width: 100px;
+            max-height: 150px;
+            overflow: hidden;
+            transform: scale(1); /* Default scale */
+            cursor: move; /* Indicate it's draggable */
+            display: flex;
+            flex-direction: column;
+        }
+        /* Style for when the VC actor is visible */
+        .vc-actor-container.visible {
+            visibility: visible; /* Make visible */
+            opacity: 1;
+            transform: scale(1);
+            transition-delay: 0s; /* Remove delay when becoming visible */
+        }
+        .vc-actor-container img {
+            width: 100%;
+            height: calc(100% - 15px); /* Leave space for the toggle arrow */
+            object-fit: contain;
+            border-radius: 5px;
+            display: block; /* Default display */
+        }
+        /* Hide image when container is minimized */
+        .vc-actor-container.minimized img {
+            display: none;
+        }
+        /* Arrow to hide/show the VC actor image */
+        .vc-toggle-arrow {
+            width: 100%;
+            height: 15px;
+            background: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-top: 1px solid rgba(0,0,0,0.1);
+            position: relative;
+        }
+        .vc-toggle-arrow::after {
+            content: "▼"; /* Down arrow (Show image) */
+            color: gray;
+            font-size: 10px;
+        }
+        .vc-toggle-arrow.hidden::after {
+            content: "▲"; /* Up arrow (Hide image) */
+        }
+        /* Tooltip for the VC toggle arrow */
+        .vc-toggle-arrow:hover::before {
+            content: "Hide";
+            position: absolute;
+            bottom: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.5);
+            color: white;
+            padding: 3px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            white-space: nowrap;
+            z-index: 1002;
+        }
+        .vc-toggle-arrow.hidden:hover::before {
+            content: "Show";
+        }
+        /* Adjust container height when hidden */
+        .vc-actor-container.minimized {
+            height: 15px; /* Collapse to arrow height */
+        }
+
+        /* --- NEW: Sheet 2 Voiceover Card --- */
+        #sheet2VoiceoverCard {
+            position: fixed;
+            /* Default position is set by JS, but provide fallback */
+            top: 20px;
+            right: 20px;
+            visibility: hidden; /* Initially hidden */
+            opacity: 0; /* Start transparent */
+            padding: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 5px;
+            background: rgba(255, 255, 255, 0.1); /* Glassmorphism effect */
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.08);
+            z-index: 1002; /* Slightly above VC actor */
+            transition: top 0.3s ease, bottom 0.3s ease, right 0.3s ease, opacity 0.3s ease, height 0.2s ease, visibility 0s linear 0.3s; /* Delay visibility hide */
+            width: 100px;
+            height: 133.33px; /* Default height */
+            max-width: 100px;
+            max-height: 150px;
+            overflow: hidden;
+            cursor: move; /* Indicate it's draggable */
+            display: flex;
+            flex-direction: column;
+        }
+        /* Style for when the Sheet 2 VO card is visible */
+        #sheet2VoiceoverCard.visible {
+            visibility: visible; /* Make visible */
+            opacity: 1;
+            transition-delay: 0s; /* Remove delay when becoming visible */
+        }
+        #sheet2VoiceoverCard img {
+            width: 100%;
+            height: calc(100% - 15px); /* Leave space for the toggle arrow */
+            object-fit: contain;
+            border-radius: 5px;
+            display: block; /* Default display */
+        }
+        /* Hide image when container is minimized */
+        #sheet2VoiceoverCard.minimized img {
+            display: none;
+        }
+        /* Arrow to hide/show the Sheet 2 VO card image */
+        #sheet2VoiceoverToggleArrow {
+            width: 100%;
+            height: 15px;
+            background: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-top: 1px solid rgba(0,0,0,0.1);
+            position: relative;
+        }
+        #sheet2VoiceoverToggleArrow::after {
+            content: "▼"; /* Down arrow (Show image) */
+            color: gray;
+            font-size: 10px;
+        }
+        #sheet2VoiceoverToggleArrow.hidden::after {
+            content: "▲"; /* Up arrow (Hide image) */
+        }
+        /* Tooltip for the Sheet 2 VO toggle arrow */
+        #sheet2VoiceoverToggleArrow:hover::before {
+            content: "Hide";
+            position: absolute;
+            bottom: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.5);
+            color: white;
+            padding: 3px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            white-space: nowrap;
+            z-index: 1003; /* Above card content */
+        }
+        #sheet2VoiceoverToggleArrow.hidden:hover::before {
+            content: "Show";
+        }
+        /* Adjust container height when hidden */
+        #sheet2VoiceoverCard.minimized {
+            height: 15px; /* Collapse to arrow height */
+        }
+
+        /* Welcome overlay */
+        #welcome-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000; /* High z-index */
+            transition: opacity 0.5s ease, visibility 0s linear 0.5s; /* Delay visibility change */
+            visibility: visible; /* Initially visible */
+            opacity: 1;
+        }
+        /* Style to hide the welcome overlay */
+        #welcome-overlay.hidden {
+            opacity: 0;
+            visibility: hidden; /* Hide completely */
+            pointer-events: none; /* Prevent interaction when hidden */
+            transition-delay: 0s; /* Remove delay when hiding */
+        }
+        /* Welcome text styling */
+        .welcome-text {
+            color: white;
+            font-size: 48px;
+            font-weight: bold;
+            text-align: center;
+            margin-bottom: 20px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+        /* Description text styling (typing effect) */
+        .description-text {
+            color: white;
+            font-size: 18px;
+            text-align: center;
+            margin-bottom: 30px;
+            min-height: 24px; /* Prevent layout shift */
+            text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.5);
+        }
+        /* Start button styling */
+        .start-button {
+            padding: 15px 30px;
+            font-size: 18px;
+            color: white;
+            background: linear-gradient(135deg, #FF5722, #D81B60); /* Gradient background */
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            box-shadow: 0 0 15px rgba(255, 87, 34, 0.7); /* Glow effect */
+            animation: pulse 1.5s infinite; /* Pulsing animation */
+        }
+        /* Pulsing animation keyframes */
+        @keyframes pulse {
+            0% { transform: scale(1); box-shadow: 0 0 15px rgba(255, 87, 34, 0.7); }
+            50% { transform: scale(1.05); box-shadow: 0 0 25px rgba(255, 87, 34, 1); }
+            100% { transform: scale(1); box-shadow: 0 0 15px rgba(255, 87, 34, 0.7); }
+        }
+        /* Hover effect for start button */
+        .start-button:hover {
+            transform: scale(1.1);
+            box-shadow: 0 0 30px rgba(255, 87, 34, 1);
+            animation: none; /* Stop pulsing on hover */
+        }
+        /* Active (pressed) effect for start button */
+        .start-button:active {
+            transform: scale(0.95);
+        }
+        /* Container for logo and credit text at the bottom of the welcome overlay */
+        .bottom-logo-container {
+            position: absolute;
+            bottom: 50px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .bottom-logo {
+            width: 50px;
+            height: auto;
+            margin-bottom: 10px;
+        }
+        .credit-text {
+            color: white;
+            font-size: 14px;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+        }
+
+        /* Yellow hotspot styling (for pitch/yaw display) */
+        .yellow-hotspot {
+            position: fixed;
+            width: 20px;
+            height: 20px;
+            background: yellow;
+            border-radius: 50%;
+            z-index: 1000;
+            animation: pulse-hotspot 1.5s infinite;
+            cursor: default; /* Not clickable */
+            display: none; /* Initially hidden, JS will show it based on Excel flag */
+            left: 50%; /* Centered */
+            top: 50%;
+            transform: translate(-50%, -50%);
+        }
+        /* Pulsing animation for hotspots */
+        @keyframes pulse-hotspot {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.3); opacity: 0.7; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        /* Tooltip common styling */
+        .hotspot-tooltip { /* This class is still used by yellow hotspot */
+            position: absolute;
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-size: 12px;
+            white-space: nowrap;
+            z-index: 1001;
+            display: none; /* Hidden by default, shown on hover */
+            pointer-events: none; /* Prevent tooltip from blocking clicks */
+        }
+
+        /* Position tooltip for yellow hotspot */
+        .yellow-hotspot .hotspot-tooltip {
+            top: -30px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        /* Show tooltip on hover for yellow hotspot */
+        .yellow-hotspot:hover .hotspot-tooltip {
+            display: block;
+        }
+
+        /* Pannellum 'info' hotspot styling (can be customized further) */
+        .pnlm-hotspot.pnlm-info {
+            /* Default Pannellum info hotspots often have a red icon */
+        }
+        /* Red hotspot style (for Sheet 2 hotspots) */
+        .pnlm-hotspot.pnlm-custom.sheet2-hotspot {
+            width: 25px;
+            height: 25px;
+            background-color: rgba(220, 50, 50, 0.8); /* Red background */
+            border: 1px solid rgba(255, 255, 255, 0.7);
+            border-radius: 50%;
+            cursor: pointer;
+            transition: transform 0.2s ease, background-color 0.2s ease;
+            box-shadow: 0 0 8px rgba(220, 50, 50, 0.6);
+        }
+        .pnlm-hotspot.pnlm-custom.sheet2-hotspot:hover {
+            transform: scale(1.2);
+            background-color: rgba(255, 80, 80, 0.9);
+        }
+
+        .pnlm-tooltip {
+            /* Style the hover tooltip for info hotspots (Sheet 1) */
+            background-color: rgba(50, 50, 50, 0.9) !important; /* Darker background */
+            color: white !important;
+            border-radius: 4px !important;
+            padding: 6px 10px !important;
+            font-size: 13px !important;
+        }
+        /* Tooltip for Sheet 2 hotspots */
+        .pnlm-tooltip.sheet2-tooltip {
+            background-color: rgba(220, 50, 50, 0.9) !important; /* Reddish background */
+            color: white !important;
+            border-radius: 4px !important;
+            padding: 6px 10px !important;
+            font-size: 13px !important;
+        }
+
+
+        /* --- Hover Card Styles (Left Docked Card - Sheet 1) --- */
+        .hover-card {
+            position: absolute; /* Changed from fixed for hotspot positioning */
+            background: white;
+            border-radius: 5px;
+            z-index: 2000; /* High z-index */
+            max-width: 400px;
+            transition: opacity 0.3s ease; /* Only transition opacity */
+            visibility: hidden; /* Base is hidden */
+            opacity: 0;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            box-sizing: border-box;
+            display: flex; /* Use flex for layout */
+            flex-direction: column; /* Stack image and text */
+            overflow: hidden; /* Prevent content overflow */
+            padding: 15px; /* Add some base padding */
+            transform: none; /* Reset transform for absolute positioning */
+            justify-content: flex-start; /* Default top align */
+            align-items: center; /* Default horizontal center */
+        }
+         /* Centering image for non-docked hover card (when visible) */
+        .hover-card.visible:not(.docked-card) {
+             visibility: visible; /* Make visible immediately */
+             opacity: 0.5; /* Start semi-transparent */
+             transition: opacity 0.2s ease, visibility 0s linear 0s; /* Transition opacity changes */
+             padding: 30px 15px 15px 15px; /* Adjust padding for buttons */
+        }
+        /* Opacity on card hover/pin */
+        .hover-card.visible:not(.docked-card):hover,
+        .hover-card.visible.pinned:not(.docked-card) {
+            opacity: 1; /* Full opacity when mouse is over the card or it's pinned*/
+        }
+        /* Style for centering content on category hover */
+        .hover-card.category-hover-card {
+            justify-content: center !important; /* Vertical center */
+            align-items: center !important; /* Horizontal center */
+        }
+
+        .hover-card:not(.docked-card) img {
+             max-width: 100%;
+             max-height: 80%; /* Allow more space for image */
+             width: auto;
+             height: auto;
+             object-fit: contain;
+             flex-shrink: 0; /* Prevent shrinking */
+             margin-bottom: 10px; /* Space below image */
+        }
+         /* Style for the text details container */
+         .hover-card-details {
+             color: #333;
+             font-size: 13px;
+             text-align: left;
+             width: 100%; /* Ensure it takes available width */
+             overflow-y: auto; /* Allow scrolling if text is long */
+             display: none; /* Hide text by default */
+             padding: 0; /* Remove padding, handled by parent */
+             box-sizing: border-box;
+             max-height: 100px; /* Limit text height in hover mode */
+         }
+        /* Ensure text remains hidden when not docked */
+         .hover-card:not(.docked-card) .hover-card-details {
+             display: none !important; /* <<< THIS HIDES TEXT (from Col W) IN HOVER MODE */
+         }
+
+        /* Style for when the card is docked to the left */
+        .docked-card {
+            position: fixed; /* Back to fixed when docked */
+            left: 0;
+            top: 0;
+            height: 100%;
+            width: 300px;
+            background: white;
+            z-index: 2000; /* High z-index */
+            padding: 30px 0 0 0; /* Adjust padding: Top only, rest handled by children */
+            transform: none;
+            opacity: 1;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            display: flex;
+            flex-direction: column; /* Stack image and text */
+            justify-content: flex-start; /* Align items to top */
+            box-sizing: border-box;
+            visibility: visible; /* Ensure visible when docked */
+            transition-delay: 0s; /* Remove delay */
+            align-items: initial; /* Override potential centering */
+            transition: none; /* No transition when docked */
+        }
+        .hover-card img { /* Base styles for image */
+            object-fit: contain;
+            display: block; /* Ensure it takes space */
+            margin: 0 auto; /* Center image horizontally */
+        }
+         /* Specific style for image within docked card */
+        .docked-card img {
+             width: calc(100% - 40px); /* Full width minus padding */
+             height: auto;
+             max-height: 70%; /* Limit image height to leave space for text */
+             object-fit: contain;
+             flex-shrink: 0; /* Prevent image shrinking */
+             margin: 0 20px 15px 20px; /* Add horizontal padding and bottom margin */
+        }
+        /* Show and style text details ONLY when docked */
+        .docked-card .hover-card-details {
+             display: block !important; /* <<< THIS SHOWS TEXT (from Col W) IN DOCKED MODE */
+             padding: 0 20px 20px 20px; /* Restore padding */
+             max-height: none; /* Remove max height limit */
+             overflow-y: auto; /* Add scroll if needed */
+             flex-grow: 1; /* Allow text to take remaining vertical space */
+        }
+
+        /* Close button positioning */
+        .close-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            cursor: pointer;
+            font-size: 20px;
+            color: #333;
+            z-index: 2001; /* Above card content */
+        }
+        /* Dock button positioning */
+        .dock-btn {
+            position: absolute;
+            top: 10px;
+            right: 35px;
+            cursor: pointer;
+            font-size: 16px;
+            color: #333;
+            z-index: 2001; /* Above card content */
+            display: none; /* Hide by default */
+        }
+        /* Show dock button only when card is visible but not docked */
+        .hover-card.visible:not(.docked-card) .dock-btn {
+            display: inline; /* Or block */
+        }
+
+        /* --- Right Side Info Card Styles (Sheet 2 Hotspot) --- */
+        #sheet2Card {
+            position: fixed;
+            top: 0;
+            right: 0;
+            width: 300px; /* Card width */
+            height: 100%;
+            background: white;
+            box-shadow: -5px 0 15px rgba(0,0,0,0.2);
+            z-index: 1999; /* Below hover card, above most other things */
+            display: none; /* Hidden by default */
+            flex-direction: column;
+            padding: 20px;
+            padding-top: 40px; /* Space for close button */
+            box-sizing: border-box;
+            overflow-y: auto; /* Allow scrolling if content overflows */
+            transition: transform 0.3s ease; /* Add transition */
+            transform: translateX(100%); /* Start off-screen */
+        }
+        #sheet2Card.visible {
+            display: flex; /* Show the card */
+            transform: translateX(0); /* Slide in */
+        }
+        #sheet2Card .close-btn { /* Re-use close button style */
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            cursor: pointer;
+            font-size: 24px;
+            color: #555;
+            z-index: 2; /* Above card content */
+        }
+        #sheet2Card .close-btn:hover {
+            color: #000;
+        }
+        #sheet2Card .card-image-container {
+            width: 100%;
+            height: 200px; /* Fixed height for image area */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 15px;
+            overflow: hidden; /* Hide parts of image that don't fit */
+            background-color: #f0f0f0; /* Placeholder background */
+            border-radius: 5px;
+        }
+        #sheet2Card .card-image-container img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain; /* Fit image within container */
+            display: block;
+        }
+        #sheet2Card .card-title-price {
+            display: flex;
+            justify-content: space-between; /* Space between title and price */
+            align-items: baseline; /* Align baseline of title and price */
+            margin-bottom: 10px;
+            width: 100%;
+        }
+        #sheet2Card .card-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #333;
+            margin-right: 10px; /* Space between title and price */
+            flex-grow: 1; /* Allow title to take available space */
+        }
+        #sheet2Card .card-price {
+            font-size: 16px;
+            font-weight: bold;
+            color: #D81B60; /* Accent color for price */
+            white-space: nowrap; /* Prevent price wrapping */
+            flex-shrink: 0; /* Prevent price from shrinking */
+            display: flex; /* Use flex to align image and text */
+            align-items: baseline; /* Align baseline */
+        }
+        /* Style for the currency image (SVG) */
+        #sheet2Card .card-price img.currency-symbol {
+            height: 1em; /* Match font size */
+            max-height: 16px; /* Limit max size */
+            vertical-align: middle; /* Align with text */
+            margin-right: 4px; /* Space between image and price number */
+            display: inline-block; /* Allow spacing */
+        }
+        #sheet2Card .card-description {
+            font-size: 14px;
+            color: #666;
+            line-height: 1.5;
+        }
+
+    </style>
+</head>
+<body>
+    <div id="panorama"></div>
+
+    <div id="loading">Loading Virtual Tour...</div>
+
+    <img id="logoImg" class="logo-img logo-tr" src="" alt="Tour Logo" style="display: none;">
+
+    <div class="control-bar" id="controlBar">
+        <div class="slide-arrow" id="slideArrow" title="Toggle Thumbnails"></div>
+        <div class="category-icon" id="categoryIcon" title="Select Floor"></div>
+        <div class="fullscreen-btn" id="fullscreenBtn" title="Toggle Fullscreen"></div>
+        <div class="audio-btn play" id="playBtn" title="Play/Pause Audio"></div>
+        <div class="audio-btn bgm-toggle" id="bgmToggle" title="Toggle Background Music"></div>
+        <div class="audio-btn vc-toggle" id="vcToggle" title="Toggle Voice Commentary"></div>
+        <div class="category-list" id="categoryList"></div>
+     </div>
+
+     <div class="slide-bar" id="slideBar">
+        <div class="slide-bar-content">
+            <div class="category-name" id="categoryName">All Floors</div>
+            <div class="thumbnail-container" id="thumbnailContainer"></div>
+            <div class="scroll-indicator" id="scrollIndicator">
+                <div class="scroll-progress" id="scrollProgress"></div>
+            </div>
+            <div class="slide-counter" id="slideCounter">1 / 1</div>
+        </div>
+    </div>
+
+    <div class="vc-actor-container" id="vcActorContainer">
+        <img id="vcActorImage" src="" alt="VC Actor Avatar">
+        <div class="vc-toggle-arrow" id="vcToggleArrow" title="Show/Hide Avatar"></div>
+    </div>
+
+    <div id="sheet2VoiceoverCard">
+        <img id="sheet2VoiceoverImage" src="" alt="Sheet 2 Voiceover Image">
+        <div id="sheet2VoiceoverToggleArrow" title="Show/Hide Image"></div>
+    </div>
+
+    <div id="welcome-overlay">
+        <div class="welcome-text">Welcome to our Virtual Tour</div>
+        <div class="description-text" id="descriptionText"></div>
+        <button class="start-button" id="startButton">Start Tour</button>
+        <div class="bottom-logo-container">
+            <img id="bottomLogo" class="bottom-logo" src="" alt="Bottom Logo">
+            <div class="credit-text">© 2025-2030 Powered by Brand Name</div>
+        </div>
+    </div>
+
+    <div id="hoverCard" class="hover-card">
+        <span class="close-btn" title="Close">×</span>
+        <span class="dock-btn" title="Dock Card">Dock</span>
+        <img id="hoverCardImage" src="" alt="Hover Card Content">
+        <div id="hoverCardText" class="hover-card-details"></div>
+    </div>
+
+    <div id="yellowHotspot" class="yellow-hotspot">
+        <span class="hotspot-tooltip"></span>
+    </div>
+
+    <div id="sheet2Card">
+        <span class="close-btn" id="sheet2CardCloseBtn" title="Close">×</span>
+        <div class="card-image-container">
+            <img id="sheet2CardImage" src="" alt="Product Image">
+        </div>
+        <div class="card-title-price">
+            <span id="sheet2CardTitle" class="card-title">Product Title</span>
+            <span id="sheet2CardPrice" class="card-price">$0.00</span>
+        </div>
+        <div id="sheet2CardDescription" class="card-description">
+            Product description goes here...
+        </div>
+    </div>
+
+
+    <script>
+        // --- Global Variables ---
+        let viewer; // Pannellum viewer instance
+        let scenes = []; // Array to hold all scene data from Sheet 1
+        let additionalHotspots = []; // Array to hold hotspot data from Sheet 2
+        let currentSceneIndex = 0; // Index of the currently displayed scene in filteredScenes
+        let tourLogoUrl = ''; // URL for the tour logo
+        let categories = new Set(['all', 'Ground Floor', 'First Floor']); // Predefined categories + 'all'
+        let filteredScenes = []; // Array of scenes currently displayed in the slide bar (after filtering)
+        let targetScrollLeft = 0; // Target scroll position for smooth scrolling animation
+        let currentScrollLeft = 0; // Current scroll position of the thumbnail container
+        let isDraggingThumbnails = false; // Flag for dragging the thumbnail container
+        let startX; // Starting X position for drag
+        let startScrollLeft; // Starting scrollLeft for drag
+        let touchStartX; // Starting X for touch drag
+        let touchStartY; // Starting Y for touch drag
+        let touchStartScrollLeft; // Starting scrollLeft for touch drag
+        let slideBarVisible = false; // Is the slide bar currently visible?
+        let slideBarPinned = false; // Is the slide bar pinned open?
+        let categoryListVisible = false; // Is the category selection list visible?
+        let isDraggingScrollIndicator = false; // Flag for dragging the scroll indicator handle
+        let hasInteracted = false; // Has the user interacted with the page (needed for autoplay)?
+        let isInitialLoad = true; // Flag for the very first load
+        let isAutoPlayEnabled = true; // Controls whether audio plays automatically on scene change
+        let scrollAnimationStartTime = null; // Timestamp for starting scroll animation
+        let scrollAnimationDuration = 300; // Duration of the scroll animation (ms)
+        let scrollStartPosition = 0; // Scroll position at the start of an animation
+        let currentCard = null; // Reference to the currently displayed hover/docked card element (#hoverCard)
+        let hoverTimeout = null; // Timeout ID for hiding hover card after mouseleave
+        let cardWasPinnedByClick = false; // Track if hover card was opened by hotspot click
+        let welcomeOverlayVisible = true; // Is the welcome overlay currently visible?
+        const descriptionSentences = [ "Brand premium Sofas", "Brand new premium Beddings", "Brand premium floor matts", "Brand premium Chairs" ];
+        let currentSentenceIndex = 0; // Index for the typing animation sentences
+        let currentText = "Brand"; // Current text being displayed in the typing animation
+        let typingSpeed = 80; // Speed of typing characters (ms)
+        let eraseSpeed = 10; // Speed of erasing characters (ms)
+        let delayBetweenSentences = 1500; // Pause between sentences (ms)
+        let tourStarted = false; // Flag to track if the "Start Tour" button has been clicked
+
+        // --- Audio State ---
+        let bgmAudio = new Audio(); // Audio element for background music (Sheet 1)
+        let vcAudio = new Audio(); // Audio element for voice commentary (Sheet 1)
+        let ttsUtterance = null; // SpeechSynthesisUtterance object for Text-to-Speech (Sheet 1)
+        let sheet2Audio = new Audio(); // Audio element for Sheet 2 voiceover
+        let sheet2TtsUtterance = null; // SpeechSynthesisUtterance object for Sheet 2 TTS
+        let isBgmOn = true; // Is background music enabled (master toggle)?
+        let isVcOn = true; // Is voice commentary enabled (master toggle)?
+        let isAudioPlaying = false; // Is any audio currently playing (master play/pause)?
+        let isTTSPlaying = false; // Is Text-to-Speech currently active (Sheet 1)?
+        let isSheet2AudioPlaying = false; // Is Sheet 2 audio URL currently playing?
+        let isSheet2TTSPlaying = false; // Is Sheet 2 TTS currently active?
+
+        // --- VC Actor Card (Sheet 1) State ---
+        let vcActorContainerEl; // Element reference
+        let isDraggingVc = false; // Flag for dragging the VC actor container
+        let vcStartX, vcStartY, vcOffsetX, vcOffsetY; // Variables for VC container dragging
+        let isVcHidden = false; // Is the VC actor image currently hidden (container minimized)?
+        let vcCardLastPosition = { right: '20px', bottom: '20px', hasBeenDragged: false }; // Store last known position and drag state
+
+        // --- Sheet 2 Voiceover Card State ---
+        let sheet2VoiceoverCardEl, sheet2VoiceoverImageEl, sheet2VoiceoverToggleArrowEl; // Element references
+        let isDraggingSheet2Vo = false; // Flag for dragging the Sheet 2 VO card
+        let sheet2VoStartX, sheet2VoStartY, sheet2VoOffsetX, sheet2VoOffsetY; // Variables for Sheet 2 VO card dragging
+        let isSheet2VoHidden = false; // Is the Sheet 2 VO card image currently hidden?
+        let sheet2VoCardLastPosition = { right: '20px', top: '20px', bottom: 'auto', hasBeenDragged: false }; // Store last known position and drag state
+
+        // --- Auto-Rotation Variables ---
+        let initialScenePitch = 0; // Store initial pitch of the first scene
+        let initialSceneYaw = 0;   // Store initial yaw of the first scene
+        let autoRotateTimeoutId = null; // Timeout ID for delayed auto-rotation start
+        let interactionTimeoutId = null; // Timeout ID for restarting rotation after interaction
+        let isInteracting = false; // Flag to track user interaction state
+        let currentSceneAutoRotateSpeed = 0; // Auto-rotate speed for the current scene
+
+        // --- Right Info Card (Sheet 2) State ---
+        let isRightCardVisible = false; // Track visibility of the Sheet 2 info card
+
+        // --- Left Hover/Dock Card (Sheet 1) State ---
+        let isLeftCardDocked = false; // Track if the left card is docked
+
+        // --- Utility Functions ---
+
+        // Easing function for smooth animations
+        function ease(t) { const t2 = t * t; const t3 = t2 * t; return 4 * t3 - 6 * t2 + 4 * t; }
+        // Helper function to safely parse numeric values
+        const parseNumeric = (value, defaultValue = 0) => { const num = parseFloat(value); return !isNaN(num) ? num : defaultValue; };
+        // Helper function to safely parse boolean values
+        const parseBoolean = (value, defaultValue = false) => {
+            if (value === null || value === undefined || String(value).trim() === '') return defaultValue;
+            const lowerVal = String(value).trim().toLowerCase();
+            if (lowerVal === 'true') return true; if (lowerVal === 'false') return false;
+            return defaultValue;
+        };
+        // Helper function to safely get string values
+        const getString = (value, defaultValue = '') => (value !== null && value !== undefined) ? String(value).trim() : defaultValue;
+        // Helper function to check if a string is a valid URL (simple check)
+        const isValidUrl = (string) => {
+            if (!string || typeof string !== 'string') return false;
+            const trimmed = string.trim();
+            return trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('/');
+        };
+        // Helper function to check if a string represents a valid, non-empty, non-'false' value
+        const isValidAndNotEmpty = (value) => {
+            if (value === null || value === undefined) return false;
+            const strValue = String(value).trim();
+            return strValue !== '' && strValue.toLowerCase() !== 'false';
+        };
+
+
+        // --- Core Logic ---
+
+        // Fetches data from the Excel file (both sheets) and initializes the tour
+        async function loadTourData() {
+            try {
+                const excelUrl = 'https://raw.githubusercontent.com/Rmoosa2014/vr-tour/main/360MasterData.xlsx';
+                console.log(`Fetching Excel data from: ${excelUrl}`);
+                const response = await fetch(excelUrl);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const arrayBuffer = await response.arrayBuffer();
+                const data = new Uint8Array(arrayBuffer);
+                const workbook = XLSX.read(data, { type: 'array' });
+
+                // --- Process Sheet 1: Scene Data ---
+                const sceneSheetName = workbook.SheetNames[0];
+                const sceneWorksheet = workbook.Sheets[sceneSheetName];
+                if (!sceneWorksheet) throw new Error(`Sheet "${sceneSheetName}" not found.`);
+                const sceneJsonData = XLSX.utils.sheet_to_json(sceneWorksheet, { defval: null });
+                console.log(`Processing Sheet 1: "${sceneSheetName}" (${sceneJsonData.length} rows)`);
+                const sceneColumns = Object.keys(sceneJsonData[0] || {});
+
+                scenes = sceneJsonData.map((row, index) => {
+                    const findCol = (keywords) => sceneColumns.find(col => keywords.some(kw => col.toLowerCase().includes(kw)));
+                    const getVal = (index) => (sceneColumns[index] && row[sceneColumns[index]] !== null && row[sceneColumns[index]] !== undefined) ? row[sceneColumns[index]] : null;
+
+                    const imageUrlColumn = findCol(['panorama', 'url']);
+                    const sceneNameColumn = findCol(['scenedisplayname', 'name', 'scene']);
+                    const thumbnailColumn = findCol(['thumb', 'preview']);
+                    const categoryColumn = findCol(['floorgroupname']);
+                    const sceneIdColumn = findCol(['sceneid']);
+
+                    const hideShowVal = getVal(18);      // Column S (Visibility)
+                    const bgmVal = getVal(7);           // Column H (BGM URL)
+                    const vcVal = getVal(9);            // Column J (VC URL/Text)
+                    const bgmTriggerVal = getVal(8);      // Column I (BGM Active?)
+                    const vcTriggerVal = getVal(12);     // Column M (VC Active?)
+                    const vcActorAvatarVal = getVal(10); // Column K (VC Avatar URL)
+                    const vcActorBgColorVal = getVal(11); // Column L (VC BG Color)
+                    const initialPitchVal = getVal(13);  // Column N (Initial Pitch)
+                    const initialYawVal = getVal(14);    // Column O (Initial Yaw)
+                    const initialZoomVal = getVal(15);   // Column P (Initial Zoom/HFov)
+                    const autoRotateVal = getVal(16);    // Column Q (Auto Rotate Speed)
+                    const hotspotIdVal = getVal(19);     // Column T (Info Hotspot Tooltip Text)
+                    const hotspotShowVal = getVal(20);   // Column U (Info Hotspot Visibility)
+                    const cardUrlVal = getVal(21);       // Column V (Hover Card Image URL)
+                    const floorMapDetailsVal = getVal(22); // Column W (Hover Card Text)
+                    const showCardVal = getVal(23);      // Column X (Show Hover Card on Hotspot Click?)
+                    const getPitchYawVal = getVal(24);   // Column Y (Show Yellow Pitch/Yaw Hotspot?)
+
+                    if (index === 0) { const logoColumn = findCol(['logo']); if (logoColumn && row[logoColumn]) tourLogoUrl = getString(row[logoColumn]); }
+
+                    const category = categoryColumn ? getString(row[categoryColumn], 'Uncategorized') : 'Uncategorized';
+                    const isVisible = parseBoolean(hideShowVal, true);
+                    const bgmActive = parseBoolean(bgmTriggerVal, false);
+                    const vcActive = parseBoolean(vcTriggerVal, false);
+                    const showCard = parseBoolean(showCardVal, false);
+                    const showHotspot = parseBoolean(hotspotShowVal, false);
+                    const getPitchYaw = parseBoolean(getPitchYawVal, false);
+                    const floorMapDetails = getString(floorMapDetailsVal);
+                    const cardUrl = getString(cardUrlVal);
+                    const hotspotIdText = getString(hotspotIdVal);
+                    const sceneId = sceneIdColumn ? getString(row[sceneIdColumn]) : `Scene-${index + 1}`;
+
+                    let bgColor = 'transparent';
+                    if (vcActorBgColorVal) {
+                        const bgValue = getString(vcActorBgColorVal);
+                        if (bgValue.includes(',')) { const parts = bgValue.split(',').map(val => val.trim()); if (parts.length === 4 && parts.every(p => p !== '')) bgColor = `rgba(${parts[0]}, ${parts[1]}, ${parts[2]}, ${parts[3]})`; }
+                        else if (bgValue) { bgColor = bgValue.toLowerCase(); }
+                    }
+
+                    const pitch = parseNumeric(initialPitchVal, 0); const yaw = parseNumeric(initialYawVal, 0);
+                    const zoom = parseNumeric(initialZoomVal, 100); const rotateSpeed = parseNumeric(autoRotateVal, 0);
+                    if (index === 0) { initialScenePitch = pitch; initialSceneYaw = yaw; }
+
+                    return {
+                        id: sceneId, internalId: `Slide-${index + 1}`, name: sceneNameColumn ? getString(row[sceneNameColumn], `Slide ${index + 1}`) : `Slide ${index + 1}`,
+                        imageUrl: imageUrlColumn ? getString(row[imageUrlColumn]) : null, thumbnailUrl: thumbnailColumn ? getString(row[thumbnailColumn]) : null,
+                        category: category, isVisible: isVisible, bgmUrl: getString(bgmVal), vcUrl: getString(vcVal), bgmActive: bgmActive, vcActive: vcActive,
+                        vcActorAvatarUrl: getString(vcActorAvatarVal), vcActorBgColor: bgColor, initialPitch: pitch, initialYaw: yaw, initialZoom: zoom, autoRotate: rotateSpeed,
+                        hotspotIdText: hotspotIdText, cardUrl: cardUrl, floorMapDetails: floorMapDetails, showCard: showCard, showHotspot: showHotspot, getPitchYaw: getPitchYaw
+                    };
+                }).filter(scene => scene.imageUrl && scene.isVisible && scene.id);
+
+                // --- Process Sheet 2: Additional Hotspot Data ---
+                const hotspotSheetName = "2. Hotspots Sheet";
+                const hotspotWorksheet = workbook.Sheets[hotspotSheetName];
+                if (!hotspotWorksheet) {
+                    console.warn(`Sheet "${hotspotSheetName}" not found. No additional hotspots will be added.`); additionalHotspots = [];
+                } else {
+                    const hotspotJsonData = XLSX.utils.sheet_to_json(hotspotWorksheet, { defval: null });
+                    console.log(`Processing Sheet 2: "${hotspotSheetName}" (${hotspotJsonData.length} rows)`);
+                    const hotspotColumns = Object.keys(hotspotJsonData[0] || {});
+                    const getHotspotVal = (index, row) => (hotspotColumns[index] && row[hotspotColumns[index]] !== null && row[hotspotColumns[index]] !== undefined) ? row[hotspotColumns[index]] : null;
+
+                    additionalHotspots = hotspotJsonData.map((row, index) => {
+                        const targetSceneId = getString(getHotspotVal(2, row)); // Column C
+                        const name = getString(getHotspotVal(4, row), `Hotspot ${index + 1}`); // Column E
+                        const pitch = parseNumeric(getHotspotVal(8, row), 0);  // Column I
+                        const yaw = parseNumeric(getHotspotVal(9, row), 0);    // Column J
+                        const cardImageUrl = getString(getHotspotVal(12, row)); // Column M (Info Card Image)
+                        const cardTitle = getString(getHotspotVal(13, row));    // Column N (Info Card Title)
+                        const cardDescription = getString(getHotspotVal(14, row)); // Column O (Info Card Desc)
+                        const cardCurrency = getString(getHotspotVal(15, row)); // Column P (Info Card Currency)
+                        const cardPrice = getString(getHotspotVal(16, row));    // Column Q (Info Card Price)
+                        const sheet2ImageUrl = getString(getHotspotVal(17, row)); // Column R (VO Card Image)
+                        const sheet2AudioSource = getString(getHotspotVal(18, row)); // Column S (VO Card Audio/Text)
+                        // --- FIX: Read Column T for VO Active state ---
+                        const sheet2VoActiveVal = getHotspotVal(19, row); // Column T
+                        const sheet2VoActive = parseBoolean(sheet2VoActiveVal, false); // Default to false if empty/invalid
+
+                        if (targetSceneId) {
+                            return {
+                                targetSceneId: targetSceneId, name: name, pitch: pitch, yaw: yaw,
+                                cardImageUrl: cardImageUrl, cardTitle: cardTitle, cardDescription: cardDescription, cardCurrency: cardCurrency, cardPrice: cardPrice,
+                                sheet2ImageUrl: sheet2ImageUrl,
+                                sheet2AudioSource: sheet2AudioSource,
+                                sheet2VoActive: sheet2VoActive // Store the flag
+                            };
+                        }
+                        return null;
+                    }).filter(hotspot => hotspot !== null);
+                    console.log(`Loaded ${additionalHotspots.length} additional hotspots from Sheet 2.`);
+                }
+
+                if (scenes.length === 0) throw new Error('No valid scenes found in Excel data (Sheet 1) or all are hidden/missing ID.');
+
+                filteredScenes = [...scenes];
+                populateCategoryFilter();
+                createSlideBar();
+                initializeViewer();
+                setupSlideBarInteractions();
+                setupVcContainerInteractions(); // Sheet 1 VC Card
+                setupSheet2VoiceoverInteractions(); // Sheet 2 VO Card
+                updateSlideCounter();
+                animateScroll();
+                startTypingAnimation();
+                setupStartButton();
+                setupRightCardCloseButton(); // Info Card (Right)
+
+            } catch (error) {
+                console.error('Error loading tour data:', error);
+                const loadingDiv = document.getElementById('loading');
+                if (loadingDiv) { loadingDiv.textContent = `Error loading tour data: ${error.message}. Check console & file link/format.`; loadingDiv.style.color = 'red'; loadingDiv.style.fontSize = '18px'; loadingDiv.style.textAlign = 'center'; loadingDiv.style.padding = '20px'; }
+            }
+        }
+
+        // Initializes the Pannellum viewer
+        function initializeViewer() {
+            const panorama = document.getElementById('panorama');
+            if (!panorama) { console.error('Panorama element not found'); document.getElementById('loading').textContent = 'Error: Panorama container not found.'; return; }
+
+            const pannellumConfig = {
+                type: 'equirectangular', scenes: {}, autoLoad: false, showControls: false, compass: false,
+                draggable: true, mouseZoom: true, touchPan: true, touchZoom: true, hotSpotDebug: false, sceneFadeDuration: 1000,
+            };
+
+            try { viewer = pannellum.viewer('panorama', pannellumConfig); }
+            catch (error) { console.error("Error initializing Pannellum:", error); document.getElementById('loading').textContent = 'Error initializing 360 viewer.'; return; }
+
+            scenes.forEach((scene, index) => {
+                if (!scene.id || !scene.imageUrl) { console.warn(`Skipping scene ${index}: missing ID or Image URL.`); return; }
+                const sceneHotspots = [];
+
+                // 1. Add Sheet 1 info hotspot (if enabled)
+                if (scene.showHotspot) {
+                    sceneHotspots.push({
+                        pitch: scene.initialPitch + 5, yaw: scene.initialYaw + 10, type: 'info', text: scene.hotspotIdText || 'More Info',
+                        clickHandlerFunc: handleInfoHotspotClick, clickHandlerArgs: { sceneId: scene.id, showCard: scene.showCard }
+                    });
+                }
+                // 2. Add Sheet 2 custom hotspots
+                const relatedNewHotspots = additionalHotspots.filter(hs => hs.targetSceneId === scene.id);
+                relatedNewHotspots.forEach(newHotspot => {
+                    sceneHotspots.push({
+                        pitch: newHotspot.pitch, yaw: newHotspot.yaw, type: 'custom', cssClass: 'sheet2-hotspot',
+                        createTooltipFunc: createSheet2Tooltip, createTooltipArgs: newHotspot.name,
+                        clickHandlerFunc: handleSheet2HotspotClick, // Updated handler
+                        clickHandlerArgs: newHotspot // Pass all hotspot data
+                    });
+                });
+
+                viewer.addScene(scene.id, {
+                    title: scene.name, panorama: scene.imageUrl, pitch: scene.initialPitch, yaw: scene.initialYaw, hfov: scene.initialZoom,
+                    autoRotate: scene.autoRotate, hotSpots: sceneHotspots
+                });
+            });
+
+            // --- Pannellum Event Listeners ---
+            viewer.on('load', () => {
+                const sceneId = viewer.getScene(); console.log('Viewer loaded scene:', sceneId);
+                const loadingDiv = document.getElementById('loading');
+                 if (sceneId) {
+                     currentSceneIndex = filteredScenes.findIndex(s => s.id === sceneId);
+                      if (currentSceneIndex !== -1) {
+                         const currentScene = filteredScenes[currentSceneIndex];
+                         currentSceneAutoRotateSpeed = currentScene.autoRotate || 0;
+                         console.log(`Scene ${sceneId} loaded. BGM Active Flag: ${currentScene.bgmActive}, VC Active Flag: ${currentScene.vcActive}, AutoRotate speed: ${currentSceneAutoRotateSpeed}`);
+                         updateActiveThumbnail(sceneId);
+                         updateYellowHotspotTooltip();
+                         playSceneAudio(sceneId); // Handles BGM/VC based on flags & stops Sheet 2 audio
+                         if (tourStarted) { handleDelayedAutoRotate(sceneId); }
+                         else if (currentSceneIndex === 0 && currentSceneAutoRotateSpeed !== 0) { viewer.startAutoRotate(currentSceneAutoRotateSpeed); }
+                         else { viewer.stopAutoRotate(); }
+                         // FIX: Reset VC card position on load unless dragged
+                         if (!vcCardLastPosition.hasBeenDragged) {
+                            recalculateAndSetVcCardPosition();
+                         }
+                      } else { console.warn(`Loaded scene ID "${sceneId}" not found in filteredScenes.`); currentSceneAutoRotateSpeed = 0; viewer.stopAutoRotate(); hideVcActorCard(); }
+                 } else { console.warn("Viewer 'load' event fired but getScene() returned undefined."); currentSceneAutoRotateSpeed = 0; viewer.stopAutoRotate(); hideVcActorCard(); }
+                if (loadingDiv && loadingDiv.style.display !== 'none') { loadingDiv.style.display = 'none'; }
+                adjustViewerSize();
+            });
+
+            viewer.on('scenechange', (newSceneId) => {
+                console.log('Scene changing to:', newSceneId);
+                 clearTimeout(autoRotateTimeoutId); clearTimeout(interactionTimeoutId); viewer.stopAutoRotate();
+                 // Don't hide right card on scene change, let hotspots control it
+                 hideSheet2VoiceoverCard(); // Hide Sheet 2 VO card
+                 stopSheet2Audio(); // Stop Sheet 2 audio/TTS
+
+                 if (newSceneId) {
+                      const newSceneIndex = filteredScenes.findIndex(s => s.id === newSceneId);
+                      if (newSceneIndex !== -1) {
+                           const newScene = filteredScenes[newSceneIndex]; currentSceneIndex = newSceneIndex;
+                           currentSceneAutoRotateSpeed = newScene.autoRotate || 0;
+                           console.log(`Scene change: New scene ${newSceneId} has autoRotate speed: ${currentSceneAutoRotateSpeed}`);
+                           if (currentCard && currentCard.classList.contains('docked-card')) { // Left card docked
+                               if (newScene.showCard === true) { updateCardContent(newScene); } else { hideHoverCard(currentCard); }
+                           } else if (currentCard && !currentCard.classList.contains('docked-card')) { hideHoverCard(currentCard); } // Left card hovering
+                           updateYellowHotspotTooltip();
+                           // Restore Sheet 1 VC Actor visibility and position if needed for the new scene
+                           showVcActorCardIfNeeded(newScene); // This will handle position based on right card state and drag state
+                      } else {
+                           console.warn(`Changing to scene ID "${newSceneId}" which was not found in filteredScenes.`); currentSceneIndex = -1; currentSceneAutoRotateSpeed = 0; if (currentCard) hideHoverCard(currentCard); updateYellowHotspotTooltip();
+                           hideVcActorCard(); // Hide Sheet 1 VC if scene not found
+                        }
+                 } else {
+                     console.warn("Scene changed but new sceneId is undefined."); currentSceneIndex = -1; currentSceneAutoRotateSpeed = 0; if (currentCard) hideHoverCard(currentCard); updateYellowHotspotTooltip();
+                     hideVcActorCard(); // Hide Sheet 1 VC if scene is undefined
+                    }
+            });
+
+            // Interaction Listeners for Auto-Rotate
+            viewer.on('mousedown', handleInteractionStart); viewer.on('touchstart', handleInteractionStart);
+            viewer.on('mouseup', handleInteractionEnd); viewer.on('touchend', handleInteractionEnd);
+            viewer.on('zoomstart', handleInteractionStart); viewer.on('zoomchange', handleInteractionEnd);
+            viewer.on('animatefinished', handleInteractionEnd);
+            // Tooltip Update Listeners
+            viewer.on('animatefinished', updateYellowHotspotTooltip); viewer.on('zoomchange', updateYellowHotspotTooltip); viewer.on('viewchange', updateYellowHotspotTooltip);
+
+            // Load Initial Scene
+             if (filteredScenes.length > 0 && filteredScenes[0]?.id) { viewer.loadScene(filteredScenes[0].id); }
+             else { console.error("Cannot load initial scene: No valid scenes found after filtering."); const loadingDiv = document.getElementById('loading'); if (loadingDiv) loadingDiv.textContent = 'Error: No valid scenes found to display.'; }
+
+            // Set Logos
+            const logoImg = document.getElementById('logoImg'); const bottomLogo = document.getElementById('bottomLogo');
+            if (tourLogoUrl) {
+                if (logoImg) { logoImg.src = tourLogoUrl; logoImg.style.display = 'block'; logoImg.onerror = () => { console.error("Logo load error (Top Right)"); logoImg.style.display='none'; }}
+                if (bottomLogo) { bottomLogo.src = tourLogoUrl; bottomLogo.style.display = 'block'; bottomLogo.onerror = () => { console.error("Logo load error (Welcome)"); bottomLogo.style.display='none'; }}
+            } else { console.warn("No Logo URL found in Excel data (first row, 'logo' column)."); }
+
+            setupAudioControls();
+        }
+
+        // --- Start Button Setup ---
+        function setupStartButton() {
+            const welcomeOverlay = document.getElementById('welcome-overlay'); const startButton = document.getElementById('startButton');
+            if (!welcomeOverlay || !startButton || !viewer) { console.error('Welcome overlay, start button, or viewer not found'); return; }
+            startButton.removeEventListener('click', handleStartTour); startButton.addEventListener('click', handleStartTour);
+            function handleStartTour(e) {
+                e.stopPropagation(); e.preventDefault(); if (tourStarted) return; tourStarted = true;
+                welcomeOverlay.classList.add('hidden'); welcomeOverlayVisible = false; hasInteracted = true; isAudioPlaying = true; isAutoPlayEnabled = true;
+                const playBtn = document.getElementById('playBtn'); if (playBtn) playBtn.classList.add('paused'); // Set button to 'paused' state (showing pause icon)
+                console.log("Start Tour clicked: Interaction registered, Audio Playing set to true.");
+                viewer.stopAutoRotate(); clearTimeout(autoRotateTimeoutId); clearTimeout(interactionTimeoutId);
+                console.log(`Animating back to Pitch: ${initialScenePitch}, Yaw: ${initialSceneYaw}`);
+                viewer.lookAt(initialScenePitch, initialSceneYaw, viewer.getHfov(), 500);
+                setTimeout(() => { if (viewer && viewer.getScene()) { const currentSceneId = viewer.getScene(); playSceneAudio(currentSceneId); handleDelayedAutoRotate(currentSceneId); } }, 100);
+            }
+        }
+
+        // --- Delayed Auto-Rotation Handling ---
+        function handleDelayedAutoRotate(sceneId) {
+            if (!viewer || !tourStarted) return; clearTimeout(autoRotateTimeoutId);
+            const scene = filteredScenes.find(s => s.id === sceneId); if (!scene) { console.warn(`[handleDelayedAutoRotate] Scene not found: ${sceneId}`); currentSceneAutoRotateSpeed = 0; return; }
+            if (currentSceneAutoRotateSpeed !== 0 && !isInteracting) {
+                console.log(`[handleDelayedAutoRotate] Scheduling auto-rotate for scene ${sceneId} in 25s. Speed: ${currentSceneAutoRotateSpeed}`);
+                autoRotateTimeoutId = setTimeout(() => { if (!isInteracting) { console.log(`[handleDelayedAutoRotate] Starting auto-rotate now for scene ${sceneId}. Speed: ${currentSceneAutoRotateSpeed}`); viewer.startAutoRotate(currentSceneAutoRotateSpeed); } else { console.log(`[handleDelayedAutoRotate] Interaction started during timeout. Aborting.`); } }, 25000);
+            } else { console.log(`[handleDelayedAutoRotate] Auto-rotate not scheduled for scene ${sceneId}. Speed: ${currentSceneAutoRotateSpeed}, Interacting: ${isInteracting}`); viewer.stopAutoRotate(); }
+        }
+
+        // --- Interaction Handling for Auto-Rotate ---
+        function handleInteractionStart() {
+            if (!viewer || !tourStarted) return;
+            if (!isInteracting) { console.log("[Interaction Start] Stopping auto-rotate and clearing timeouts."); isInteracting = true; viewer.stopAutoRotate(); clearTimeout(autoRotateTimeoutId); clearTimeout(interactionTimeoutId); }
+        }
+        function handleInteractionEnd() {
+            if (!viewer || !tourStarted || !isInteracting) return;
+            console.log("[Interaction End] Scheduling auto-rotate restart check in 25s."); isInteracting = false; clearTimeout(interactionTimeoutId);
+            interactionTimeoutId = setTimeout(() => { if (!isInteracting && currentSceneAutoRotateSpeed !== 0) { console.log(`[Interaction End Timeout] Restarting auto-rotate. Speed: ${currentSceneAutoRotateSpeed}`); viewer.startAutoRotate(currentSceneAutoRotateSpeed); } else { console.log(`[Interaction End Timeout] Auto-rotate not restarting. Interacting: ${isInteracting}, Speed: ${currentSceneAutoRotateSpeed}`); } }, 25000);
+        }
+
+        // --- Category Filter and Slide Bar UI ---
+        function populateCategoryFilter() {
+            const categoryList = document.getElementById('categoryList'); if (!categoryList) return; categoryList.innerHTML = '';
+            const fixedCategories = ['All Floors', 'Ground Floor', 'First Floor'].reverse();
+            fixedCategories.forEach(category => {
+                const item = document.createElement('div'); item.className = 'category-item'; item.textContent = category;
+                item.dataset.category = category === 'All Floors' ? 'all' : category; if (category === 'All Floors') item.classList.add('active');
+                item.addEventListener('click', (e) => {
+                    e.stopPropagation(); document.querySelectorAll('.category-item').forEach(i => i.classList.remove('active')); item.classList.add('active');
+                    filterScenes(item.dataset.category); toggleSlideBar(true, true); toggleCategoryList(false);
+                     if (currentCard && !currentCard.classList.contains('docked-card')) { hideHoverCard(); } hideRightCard(); hideSheet2VoiceoverCard();
+                });
+                item.addEventListener('mouseenter', (e) => {
+                    e.stopPropagation(); if (hoverTimeout) clearTimeout(hoverTimeout); const hoveredCategory = item.dataset.category;
+                    if (hoveredCategory === 'all') { if (currentCard && !currentCard.classList.contains('docked-card')) { hideHoverCard(); } return; }
+                    const currentActiveScene = (filteredScenes && currentSceneIndex >= 0 && currentSceneIndex < filteredScenes.length) ? filteredScenes[currentSceneIndex] : null;
+                    const shouldShowCard = currentActiveScene && currentActiveScene.category === hoveredCategory && currentActiveScene.showCard === true;
+                    if (shouldShowCard) { showHoverCard(currentActiveScene, true, e.target, true); }
+                    else { if (currentCard && !currentCard.classList.contains('docked-card')) { hideHoverCard(); } }
+                });
+                item.addEventListener('mouseleave', (e) => {
+                    e.stopPropagation(); if (hoverTimeout) clearTimeout(hoverTimeout);
+                    if (currentCard && !currentCard.classList.contains('pinned') && !currentCard.classList.contains('docked-card')) {
+                        hoverTimeout = setTimeout(() => { if (currentCard && !currentCard.classList.contains('docked-card') && !currentCard.classList.contains('pinned') && !currentCard.matches(':hover')) { hideHoverCard(); } }, 300);
+                    }
+                });
+                categoryList.appendChild(item);
+            });
+        }
+        function filterScenes(category) {
+            const categoryName = document.getElementById('categoryName'); if (!categoryName) return;
+            if (category === 'all') { filteredScenes = [...scenes]; categoryName.textContent = 'All Floors'; }
+            else { filteredScenes = scenes.filter(scene => scene.category === category); categoryName.textContent = category; }
+            const thumbnailContainer = document.getElementById('thumbnailContainer'); if (!thumbnailContainer) return; thumbnailContainer.innerHTML = ''; createSlideBar();
+            if (filteredScenes.length > 0 && viewer) { currentSceneIndex = 0; viewer.loadScene(filteredScenes[0].id); }
+            else if (viewer) { console.warn(`No scenes found for category: ${category}`); currentSceneIndex = -1; updateSlideCounter(); viewer.stopAutoRotate(); clearTimeout(autoRotateTimeoutId); clearTimeout(interactionTimeoutId); currentSceneAutoRotateSpeed = 0; }
+        }
+        function createSlideBar() {
+            const thumbnailContainer = document.getElementById('thumbnailContainer'); if (!thumbnailContainer) return; thumbnailContainer.innerHTML = '';
+            filteredScenes.forEach((scene, index) => {
+                const thumbnail = document.createElement('div'); thumbnail.className = 'thumbnail'; thumbnail.dataset.sceneId = scene.id;
+                const img = document.createElement('img'); img.src = scene.thumbnailUrl || scene.imageUrl; img.alt = scene.name;
+                img.onerror = () => {
+                    console.error(`Failed to load thumbnail for ${scene.name}: ${img.src}`);
+                    const fallbackSrc = (scene.imageUrl && scene.imageUrl !== img.src) ? scene.imageUrl : null;
+                    if (fallbackSrc) {
+                        console.log(`Attempting fallback image: ${fallbackSrc}`);
+                        img.src = fallbackSrc;
+                        img.onerror = () => {
+                            console.error(`Failed fallback image for ${scene.name}: ${fallbackSrc}`);
+                            thumbnail.style.backgroundColor = '#555';
+                            thumbnail.innerHTML = `<span style="color:white; font-size:10px; padding: 5px; text-align:center; display:block;">Load Error</span>`;
+                        };
+                    } else {
+                        thumbnail.style.backgroundColor = '#555';
+                        thumbnail.innerHTML = `<span style="color:white; font-size:10px; padding: 5px; text-align:center; display:block;">Load Error</span>`;
+                    }
+                };
+                thumbnail.appendChild(img);
+                const nameSpan = document.createElement('span'); nameSpan.className = 'thumbnail-name'; nameSpan.textContent = scene.name; thumbnail.appendChild(nameSpan);
+                thumbnail.addEventListener('click', (e) => { e.stopPropagation(); if (viewer && viewer.getScene() !== scene.id) { viewer.loadScene(scene.id); hideRightCard(); hideSheet2VoiceoverCard(); } });
+                thumbnailContainer.appendChild(thumbnail);
+            });
+            if (thumbnailContainer.children.length > 0 && viewer && viewer.getScene()) { updateActiveThumbnail(viewer.getScene()); }
+            else if (thumbnailContainer.children.length > 0) { thumbnailContainer.children[0].classList.add('active'); }
+            updateSlideCounter(); updateScrollIndicator();
+        }
+        function setupSlideBarInteractions() {
+            const slideBar = document.getElementById('slideBar'); const thumbnailContainer = document.getElementById('thumbnailContainer');
+            const slideArrow = document.getElementById('slideArrow'); const categoryIcon = document.getElementById('categoryIcon');
+            const categoryList = document.getElementById('categoryList'); const controlBar = document.getElementById('controlBar');
+            const scrollIndicator = document.getElementById('scrollIndicator'); const scrollProgress = document.getElementById('scrollProgress');
+            const fullscreenBtn = document.getElementById('fullscreenBtn');
+            if (!slideBar || !thumbnailContainer || !slideArrow || !categoryIcon || !categoryList || !controlBar || !scrollIndicator || !scrollProgress || !fullscreenBtn) { console.error('Missing DOM elements for slide bar interactions'); return; }
+
+            slideBar.addEventListener('mouseenter', () => { if (!slideBarPinned) toggleSlideBar(true, false); });
+            slideBar.addEventListener('mouseleave', () => { if (!slideBarPinned) toggleSlideBar(false, false); });
+            slideArrow.addEventListener('click', (e) => { e.stopPropagation(); slideBarPinned = !slideBarPinned; toggleSlideBar(slideBarPinned, slideBarPinned); });
+            categoryIcon.addEventListener('mousedown', (e) => { e.stopPropagation(); toggleCategoryList(!categoryListVisible); });
+            document.addEventListener('mouseup', (e) => { if (categoryListVisible && !categoryList.contains(e.target) && !categoryIcon.contains(e.target)) { toggleCategoryList(false); } });
+            categoryList.addEventListener('mouseenter', () => { if (categoryListVisible) toggleCategoryList(true); });
+            categoryList.addEventListener('mouseleave', () => { if (categoryListVisible && !categoryIcon.matches(':hover')) toggleCategoryList(false); });
+
+            document.addEventListener('click', (e) => {
+                const hoverCardEl = document.getElementById('hoverCard'); const sheet2CardEl = document.getElementById('sheet2Card'); const sheet2VoCardEl = document.getElementById('sheet2VoiceoverCard');
+                const isOutsideInteractive = !slideBar.contains(e.target) && !controlBar.contains(e.target) && !categoryList.contains(e.target) && !categoryIcon.contains(e.target) && !fullscreenBtn.contains(e.target) &&
+                                             !(hoverCardEl && hoverCardEl.contains(e.target)) && !(sheet2CardEl && sheet2CardEl.contains(e.target)) && !(sheet2VoCardEl && sheet2VoCardEl.contains(e.target));
+                if (isOutsideInteractive) {
+                    if (slideBarPinned) { slideBarPinned = false; toggleSlideBar(false, false); }
+                    if (categoryListVisible) { toggleCategoryList(false); }
+                    if (currentCard && !currentCard.classList.contains('docked-card')) { hideHoverCard(); }
+                }
+                if (!hasInteracted) hasInteracted = true;
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (isDraggingScrollIndicator) {
+                    const containerWidth = scrollIndicator.offsetWidth; const clickPosition = e.clientX - scrollIndicator.getBoundingClientRect().left;
+                    const scrollPercentage = Math.min(Math.max(clickPosition / containerWidth, 0), 1); const maxScroll = thumbnailContainer.scrollWidth - thumbnailContainer.clientWidth;
+                    targetScrollLeft = maxScroll * scrollPercentage; thumbnailContainer.scrollLeft = targetScrollLeft; currentScrollLeft = targetScrollLeft; updateScrollIndicator(); e.preventDefault();
+                }
+                 if (isDraggingVc) { // Sheet 1 VC Card Drag
+                    const newRight = vcOffsetX - (e.pageX - vcStartX); const newBottom = vcOffsetY - (e.pageY - vcStartY);
+                    vcActorContainerEl.style.right = `${newRight}px`; vcActorContainerEl.style.bottom = `${newBottom}px`;
+                    // Store the dragged position
+                    vcCardLastPosition.right = `${newRight}px`;
+                    vcCardLastPosition.bottom = `${newBottom}px`;
+                    vcCardLastPosition.hasBeenDragged = true; // Mark as dragged
+                    e.preventDefault();
+                 }
+                 if (isDraggingSheet2Vo) { // Sheet 2 VO Card Drag
+                    const newRight = sheet2VoOffsetX - (e.pageX - sheet2VoStartX);
+                    let newTop = 'auto', newBottom = 'auto';
+                    // Calculate new position based on whether it was initially top or bottom aligned
+                    if (sheet2VoCardLastPosition.top !== 'auto') {
+                        newTop = sheet2VoOffsetY + (e.pageY - sheet2VoStartY);
+                        sheet2VoiceoverCardEl.style.top = `${newTop}px`;
+                        sheet2VoiceoverCardEl.style.bottom = 'auto';
+                        sheet2VoCardLastPosition.top = `${newTop}px`;
+                        sheet2VoCardLastPosition.bottom = 'auto';
+                    } else {
+                        newBottom = sheet2VoOffsetY - (e.pageY - sheet2VoStartY);
+                        sheet2VoiceoverCardEl.style.bottom = `${newBottom}px`;
+                        sheet2VoiceoverCardEl.style.top = 'auto';
+                        sheet2VoCardLastPosition.bottom = `${newBottom}px`;
+                        sheet2VoCardLastPosition.top = 'auto';
+                    }
+                    sheet2VoiceoverCardEl.style.right = `${newRight}px`;
+                    sheet2VoCardLastPosition.right = `${newRight}px`;
+                    sheet2VoCardLastPosition.hasBeenDragged = true; // Mark as dragged
+                    e.preventDefault();
+                 }
+            });
+
+            document.addEventListener('mouseup', () => {
+                if (isDraggingScrollIndicator) { isDraggingScrollIndicator = false; document.body.style.cursor = ''; }
+                if (isDraggingVc) { isDraggingVc = false; document.body.style.cursor = ''; }
+                if (isDraggingSheet2Vo) { isDraggingSheet2Vo = false; document.body.style.cursor = ''; }
+            });
+
+            scrollIndicator.addEventListener('mousedown', (e) => {
+                isDraggingScrollIndicator = true; document.body.style.cursor = 'ew-resize'; const containerWidth = scrollIndicator.offsetWidth; const clickPosition = e.clientX - scrollIndicator.getBoundingClientRect().left;
+                const scrollPercentage = Math.min(Math.max(clickPosition / containerWidth, 0), 1); const maxScroll = thumbnailContainer.scrollWidth - thumbnailContainer.clientWidth;
+                targetScrollLeft = maxScroll * scrollPercentage; thumbnailContainer.scrollLeft = targetScrollLeft; currentScrollLeft = targetScrollLeft; updateScrollIndicator(); e.preventDefault(); e.stopPropagation();
+            });
+
+            slideBar.addEventListener('touchstart', (e) => {
+                 if (e.target === scrollIndicator || scrollIndicator.contains(e.target)) return;
+                touchStartX = e.touches[0].pageX; touchStartY = e.touches[0].pageY; touchStartScrollLeft = thumbnailContainer.scrollLeft; isDraggingThumbnails = true; scrollAnimationStartTime = null;
+            }, { passive: false });
+            slideBar.addEventListener('touchmove', (e) => {
+                if (!isDraggingThumbnails) return; const touchX = e.touches[0].pageX; const touchY = e.touches[0].pageY; const xDiff = touchX - touchStartX; const yDiff = touchY - touchStartY;
+                if (Math.abs(xDiff) > Math.abs(yDiff)) {
+                    targetScrollLeft = touchStartScrollLeft - xDiff; const maxScroll = thumbnailContainer.scrollWidth - thumbnailContainer.clientWidth; targetScrollLeft = Math.max(0, Math.min(maxScroll, targetScrollLeft));
+                    thumbnailContainer.scrollLeft = targetScrollLeft; currentScrollLeft = targetScrollLeft; updateScrollIndicator(); e.preventDefault();
+                } else if (yDiff < -20 && !slideBarVisible) { toggleSlideBar(true, false); } else if (yDiff > 20 && slideBarVisible && !slideBarPinned) { toggleSlideBar(false, false); }
+            }, { passive: false });
+            slideBar.addEventListener('touchend', () => { if (isDraggingThumbnails) isDraggingThumbnails = false; });
+
+            slideBar.addEventListener('wheel', (e) => {
+                e.preventDefault(); const scrollAmount = e.deltaY * 1; targetScrollLeft = thumbnailContainer.scrollLeft + scrollAmount; const maxScroll = thumbnailContainer.scrollWidth - thumbnailContainer.clientWidth;
+                targetScrollLeft = Math.max(0, Math.min(maxScroll, targetScrollLeft)); scrollStartPosition = thumbnailContainer.scrollLeft; scrollAnimationStartTime = performance.now();
+                if (!slideBarVisible && !slideBarPinned) toggleSlideBar(true, false);
+            }, { passive: false });
+
+            scrollIndicator.addEventListener('click', (e) => {
+                if (isDraggingScrollIndicator) return; const containerWidth = scrollIndicator.offsetWidth; const clickPosition = e.clientX - scrollIndicator.getBoundingClientRect().left;
+                const scrollPercentage = clickPosition / containerWidth; const maxScroll = thumbnailContainer.scrollWidth - thumbnailContainer.clientWidth; targetScrollLeft = maxScroll * scrollPercentage;
+                targetScrollLeft = Math.max(0, Math.min(maxScroll, targetScrollLeft)); scrollStartPosition = thumbnailContainer.scrollLeft; scrollAnimationStartTime = performance.now();
+            });
+
+            fullscreenBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleFullscreen(); });
+        }
+        function toggleSlideBar(show, pin) {
+            const slideBar = document.getElementById('slideBar'); const slideArrow = document.getElementById('slideArrow'); const controlBar = document.getElementById('controlBar');
+            if (!slideBar || !slideArrow || !controlBar) return;
+            slideBarVisible = show; if (pin !== undefined) slideBarPinned = pin; slideBar.classList.toggle('visible', show); slideArrow.classList.toggle('down', show);
+
+            // Calculate the correct bottom position for floating elements
+            const bottomOffset = show ? '170px' : '20px';
+
+            controlBar.classList.toggle('slide-up', show);
+
+            // Adjust VC card position if visible and NOT dragged
+            if (vcActorContainerEl && vcActorContainerEl.classList.contains('visible') && !vcCardLastPosition.hasBeenDragged) {
+                recalculateAndSetVcCardPosition(); // Use the helper function
+            }
+             // Adjust Sheet 2 VO card if visible, NOT dragged, and currently at the bottom
+            if (sheet2VoiceoverCardEl && sheet2VoiceoverCardEl.classList.contains('visible') && !sheet2VoCardLastPosition.hasBeenDragged && sheet2VoCardLastPosition.top === 'auto') {
+                 recalculateAndSetSheet2VoCardPosition(); // Use the helper function
+            }
+        }
+        function toggleCategoryList(show) {
+            const categoryList = document.getElementById('categoryList'); if (!categoryList || show === categoryListVisible) return; categoryListVisible = show;
+            if (!show) { categoryList.classList.remove('visible'); setTimeout(() => { if (!categoryListVisible) categoryList.style.display = 'none'; }, 300); }
+            else { categoryList.style.display = 'flex'; void categoryList.offsetWidth; categoryList.classList.add('visible'); }
+        }
+        function animateScroll(timestamp) {
+            const thumbnailContainer = document.getElementById('thumbnailContainer'); if (!thumbnailContainer) { requestAnimationFrame(animateScroll); return; }
+            if (scrollAnimationStartTime === null) { currentScrollLeft = thumbnailContainer.scrollLeft; updateScrollIndicator(); requestAnimationFrame(animateScroll); return; }
+            const elapsed = timestamp - scrollAnimationStartTime; const progress = Math.min(elapsed / scrollAnimationDuration, 1); const easedProgress = ease(progress);
+            currentScrollLeft = scrollStartPosition + (targetScrollLeft - scrollStartPosition) * easedProgress; const maxScroll = thumbnailContainer.scrollWidth - thumbnailContainer.clientWidth;
+            currentScrollLeft = Math.max(0, Math.min(maxScroll, currentScrollLeft)); thumbnailContainer.scrollLeft = currentScrollLeft; updateScrollIndicator();
+            if (progress < 1) { requestAnimationFrame(animateScroll); } else { scrollAnimationStartTime = null; requestAnimationFrame(animateScroll); }
+        }
+        function updateScrollIndicator() {
+            const container = document.getElementById('thumbnailContainer'); const progress = document.getElementById('scrollProgress'); const indicator = document.getElementById('scrollIndicator'); if (!container || !progress || !indicator) return;
+            const scrollWidth = container.scrollWidth; const clientWidth = container.clientWidth; const maxScroll = scrollWidth - clientWidth;
+            if (maxScroll > 0) { indicator.style.display = 'block'; const scrollPercentage = maxScroll > 0 ? (currentScrollLeft / maxScroll) * 100 : 0; progress.style.width = `${Math.min(100, Math.max(3, scrollPercentage))}%`; }
+            else { indicator.style.display = 'none'; progress.style.width = '0%'; }
+        }
+        function updateSlideCounter() {
+            const slideCounter = document.getElementById('slideCounter'); if (slideCounter) { const total = filteredScenes.length; const current = total > 0 && currentSceneIndex >= 0 ? currentSceneIndex + 1 : 0; slideCounter.textContent = `${current} / ${total}`; }
+        }
+        function updateActiveThumbnail(sceneId) {
+            const thumbnails = document.querySelectorAll('.thumbnail');
+            thumbnails.forEach(thumb => {
+                const isActive = thumb.dataset.sceneId === sceneId; thumb.classList.toggle('active', isActive);
+                if (isActive) {
+                    const container = document.getElementById('thumbnailContainer'); if (container) {
+                        const thumbRect = thumb.getBoundingClientRect(); const containerRect = container.getBoundingClientRect(); targetScrollLeft = thumb.offsetLeft - (containerRect.width / 2) + (thumbRect.width / 2);
+                        const maxScroll = container.scrollWidth - container.clientWidth; targetScrollLeft = Math.max(0, Math.min(maxScroll, targetScrollLeft)); scrollStartPosition = container.scrollLeft; scrollAnimationStartTime = performance.now();
+                    }
+                }
+            });
+            updateSlideCounter();
+        }
+        function toggleFullscreen() {
+            const fullscreenBtn = document.getElementById('fullscreenBtn'); if (!fullscreenBtn) return;
+            const isInFullscreen = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
+            if (!isInFullscreen) { const el = document.documentElement; const req = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen; if (req) { req.call(el).catch(err => console.error('FS enter error:', err)); } else { console.error("Fullscreen API not supported."); } }
+            else { const exit = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen || document.msExitFullscreen; if (exit) { exit.call(document).catch(err => console.error('FS exit error:', err)); } else { console.error("Exit Fullscreen API not supported."); } }
+        }
+        function adjustViewerSize() {
+             if (viewer) { setTimeout(() => { if (viewer) { viewer.resize(); /*console.log("Viewer resized");*/ } }, 50); }
+        }
+
+        // --- Audio Controls and Playback ---
+        function setupAudioControls() {
+            const playBtn = document.getElementById('playBtn'); const bgmToggle = document.getElementById('bgmToggle'); const vcToggle = document.getElementById('vcToggle');
+            if (!playBtn || !bgmToggle || !vcToggle) { console.error('Missing audio control elements'); return; }
+
+            bgmToggle.classList.toggle('active', isBgmOn); vcToggle.classList.toggle('active', isVcOn); playBtn.classList.toggle('paused', isAudioPlaying);
+
+            playBtn.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); hasInteracted = true; toggleAudioPlayback(); });
+            bgmToggle.addEventListener('click', (e) => {
+                e.stopPropagation(); e.preventDefault(); hasInteracted = true; isBgmOn = !isBgmOn; bgmToggle.classList.toggle('active', isBgmOn);
+                console.log(`[bgmToggle] BGM toggled. isBgmOn: ${isBgmOn}`);
+                const currentSceneId = viewer?.getScene(); if (!currentSceneId) return;
+                const scene = filteredScenes.find(s => s.id === currentSceneId); if (!scene) return;
+                // If BGM is turned ON, and should be playing (master play is on, scene allows BGM)
+                if (isBgmOn && scene.bgmActive && isAudioPlaying && bgmAudio.src) {
+                    fadeIn(bgmAudio, 1);
+                } else { // If BGM is turned OFF, or shouldn't be playing
+                    fadeOut(bgmAudio);
+                }
+            });
+            vcToggle.addEventListener('click', (e) => {
+                e.stopPropagation(); e.preventDefault(); hasInteracted = true; isVcOn = !isVcOn; vcToggle.classList.toggle('active', isVcOn);
+                console.log(`[vcToggle] VC toggled. isVcOn: ${isVcOn}`);
+                const currentSceneId = viewer?.getScene(); if (!currentSceneId) return;
+                const scene = filteredScenes.find(s => s.id === currentSceneId); if (!scene) return;
+                // If VC is turned ON, and should be playing (master play is on, scene allows VC)
+                if (isVcOn && scene.vcActive && isAudioPlaying) {
+                    if (vcAudio.src) {
+                        fadeIn(vcAudio, 1);
+                        manageDucking();
+                    } else if (ttsUtterance && ttsUtterance.text) {
+                        playTTS(ttsUtterance.text, 1); // Play Sheet 1 TTS (will handle ducking)
+                    }
+                } else { // If VC is turned OFF, or shouldn't be playing
+                    fadeOut(vcAudio);
+                    if (ttsUtterance || (window.speechSynthesis.speaking && isTTSPlaying)) {
+                         window.speechSynthesis.cancel();
+                         isTTSPlaying = false;
+                         ttsUtterance = null; // Clear utterance reference
+                    }
+                    // Unduck BGM if it's supposed to be playing
+                    if (isBgmOn && scene.bgmActive && bgmAudio.src && !bgmAudio.paused) {
+                         fadeIn(bgmAudio, 1, bgmAudio.volume); // Restore BGM volume
+                    }
+                }
+            });
+
+            // Audio event listeners
+            bgmAudio.addEventListener('error', (e) => console.error('BGM Error:', e.message || e, 'URL:', bgmAudio.src));
+            vcAudio.addEventListener('error', (e) => console.error('VC Error:', e.message || e, 'URL:', vcAudio.src));
+            sheet2Audio.addEventListener('error', (e) => console.error('Sheet 2 Audio Error:', e.message || e, 'URL:', sheet2Audio.src));
+            vcAudio.addEventListener('play', () => { console.log('VC playing:', vcAudio.src); manageDucking(); });
+            vcAudio.addEventListener('ended', () => { console.log('VC ended'); const sceneId = viewer?.getScene(); if (!sceneId) return; const scene = filteredScenes.find(s => s.id === sceneId); if (scene && isBgmOn && scene.bgmActive && bgmAudio.src && !bgmAudio.paused) { fadeIn(bgmAudio, 1, bgmAudio.volume); } });
+            sheet2Audio.addEventListener('play', () => { console.log('Sheet 2 Audio playing:', sheet2Audio.src); isSheet2AudioPlaying = true; manageDucking(); });
+            sheet2Audio.addEventListener('pause', () => { console.log('Sheet 2 Audio paused'); isSheet2AudioPlaying = false; });
+            sheet2Audio.addEventListener('ended', () => { console.log('Sheet 2 Audio ended'); isSheet2AudioPlaying = false; const sceneId = viewer?.getScene(); if (!sceneId) return; const scene = filteredScenes.find(s => s.id === sceneId); if (scene && isBgmOn && scene.bgmActive && bgmAudio.src && !bgmAudio.paused) { fadeIn(bgmAudio, 1, bgmAudio.volume); } });
+
+            window.speechSynthesis.onvoiceschanged = () => { console.log('TTS voices loaded'); const sceneId = viewer?.getScene(); if (!sceneId) return; const scene = filteredScenes.find(s => s.id === sceneId); if (scene && ttsUtterance && !isTTSPlaying && isVcOn && scene.vcActive && isAudioPlaying) { playTTS(ttsUtterance.text, 1); } };
+            window.speechSynthesis.getVoices(); // Preload voices
+        }
+
+        // --- FIX: Rewritten toggleAudioPlayback to reliably pause/play all sources ---
+        function toggleAudioPlayback() {
+            const playBtn = document.getElementById('playBtn'); if (!playBtn) return;
+            isAudioPlaying = !isAudioPlaying; // Toggle the master play state
+            playBtn.classList.toggle('paused', isAudioPlaying); // Update button icon ('paused' class means show pause icon)
+
+            console.log(`[toggleAudioPlayback] Master audio toggled. isAudioPlaying: ${isAudioPlaying}`);
+            const currentSceneId = viewer?.getScene();
+            const scene = currentSceneId ? filteredScenes.find(s => s.id === currentSceneId) : null;
+
+            if (isAudioPlaying) {
+                // --- Play audio ---
+                isAutoPlayEnabled = true; // Re-enable autoplay if needed
+                console.log('[toggleAudioPlayback] Autoplay enabled. Attempting to play relevant audio...');
+
+                // Play BGM if conditions met
+                if (scene && isBgmOn && scene.bgmActive && bgmAudio.src) {
+                    fadeIn(bgmAudio, 1);
+                }
+
+                // Play VC (Audio or TTS) if conditions met
+                if (scene && isVcOn && scene.vcActive) {
+                    if (vcAudio.src) {
+                        fadeIn(vcAudio, 1);
+                        // Ducking is handled by vcAudio 'play' event
+                    } else if (ttsUtterance && ttsUtterance.text) {
+                        playTTS(ttsUtterance.text, 1); // Play Sheet 1 TTS (will handle ducking)
+                    }
+                }
+
+                // Play Sheet 2 Audio/TTS if it was active before pausing (and conditions allow)
+                if (isSheet2AudioPlaying && sheet2Audio.src) {
+                    fadeIn(sheet2Audio, 1);
+                    // Ducking handled by sheet2Audio 'play' event
+                } else if (isSheet2TTSPlaying && sheet2TtsUtterance && sheet2TtsUtterance.text) {
+                    playTTS(sheet2TtsUtterance.text, 2); // Play Sheet 2 TTS (will handle ducking)
+                }
+
+            } else {
+                // --- Pause audio ---
+                isAutoPlayEnabled = false; // Disable autoplay
+                console.log('[toggleAudioPlayback] Autoplay disabled. Pausing/Stopping all audio.');
+
+                // Fade out BGM
+                fadeOut(bgmAudio);
+
+                // Fade out VC Audio
+                fadeOut(vcAudio);
+
+                // Fade out Sheet 2 Audio
+                fadeOut(sheet2Audio);
+
+                // Cancel *any* active speech synthesis
+                if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+                    window.speechSynthesis.cancel(); // This triggers onend/onerror listeners
+                    console.log("Cancelled active TTS via master pause.");
+                }
+                // Reset TTS states immediately after cancelling
+                isTTSPlaying = false;
+                isSheet2TTSPlaying = false;
+                // It's safer to nullify utterance refs here too, as cancel might not trigger onend reliably in all browsers
+                ttsUtterance = null;
+                sheet2TtsUtterance = null;
+            }
+        }
+
+        function fadeIn(audio, targetVolume, startVolume = 0) {
+            if (!audio || !audio.src || (!audio.paused && audio.volume >= targetVolume)) return; // Check src
+            clearInterval(audio.fadeInterval); audio.volume = startVolume;
+
+            function startFadeInterval() {
+                 // Check if audio is still paused *after* the play promise resolves, indicating potential failure
+                 if (audio.paused && startVolume === 0) { console.warn("Audio play likely failed (still paused after play attempt), aborting fade-in for:", audio.src); clearInterval(audio.fadeInterval); return; }
+                 const fadeDuration = 1000; const steps = 50; const stepDuration = fadeDuration / steps; const volumeStep = (targetVolume - audio.volume) / steps;
+                 audio.fadeInterval = setInterval(() => {
+                    // Check if audio became paused *during* the fade-in (e.g., user paused again)
+                    if (audio.paused) { console.warn("Audio paused during fadeIn for:", audio.src); clearInterval(audio.fadeInterval); return; }
+                    let newVolume = audio.volume + volumeStep;
+                    if ((volumeStep > 0 && newVolume >= targetVolume) || (volumeStep < 0 && newVolume <= targetVolume) || newVolume < 0 || newVolume > 1) {
+                        audio.volume = Math.max(0, Math.min(1, targetVolume)); // Clamp volume
+                        clearInterval(audio.fadeInterval);
+                    } else {
+                        audio.volume = newVolume;
+                    }
+                 }, stepDuration);
+            }
+            if (audio.paused) {
+                // Attempt to play and *then* start the fade interval
+                 audio.play().then(startFadeInterval).catch(err => { console.error('Play Error during fadeIn:', err, 'Src:', audio.src); clearInterval(audio.fadeInterval); });
+            }
+            else {
+                // If already playing (e.g., restoring volume), just start the fade
+                startFadeInterval();
+            }
+        }
+        // --- FIX: Ensure fadeOut reliably pauses the audio ---
+        function fadeOut(audio) {
+            // Check if audio element exists, has a source, and is not already paused
+            if (!audio || !audio.src || audio.paused) return;
+            clearInterval(audio.fadeInterval); // Clear any existing fade interval
+            const fadeDuration = 500; const steps = 25; const stepDuration = fadeDuration / steps; const startVolume = audio.volume;
+            // Ensure startVolume is a valid number > 0, default to 1 otherwise
+            const initialVolume = (typeof startVolume === 'number' && !isNaN(startVolume) && startVolume > 0) ? startVolume : 1;
+            const volumeStep = initialVolume / steps; // Calculate volume decrease per step
+
+            audio.fadeInterval = setInterval(() => {
+                // If audio somehow gets paused externally during fade, stop the interval
+                if (audio.paused) { clearInterval(audio.fadeInterval); audio.volume = 0; return; }
+                let newVolume = audio.volume - volumeStep;
+                if (newVolume <= 0) {
+                    audio.pause(); // <<< FIX: Explicitly pause the audio
+                    audio.volume = 0; // Ensure volume is 0
+                    clearInterval(audio.fadeInterval); // Stop the interval
+                    console.log("Audio paused by fadeOut:", audio.src);
+                } else {
+                    audio.volume = newVolume; // Decrease volume
+                }
+            }, stepDuration);
+        }
+        function manageDucking() {
+            const sceneId = viewer?.getScene(); if (!sceneId) return; const scene = filteredScenes.find(s => s.id === sceneId); if (!scene) return;
+            // Duck BGM if it's active/playing AND (Sheet 1 VC/TTS is active OR Sheet 2 Audio/TTS is active)
+            const shouldDuck = isBgmOn && scene.bgmActive && !bgmAudio.paused && bgmAudio.volume > 0 &&
+                               ( (isVcOn && scene.vcActive && (isTTSPlaying || !vcAudio.paused)) || isSheet2AudioPlaying || isSheet2TTSPlaying );
+
+            if (shouldDuck) {
+                 clearInterval(bgmAudio.fadeInterval); const targetVolume = 0.3; if (bgmAudio.volume <= targetVolume) return;
+                 const fadeDuration = 500; const steps = 25; const stepDuration = fadeDuration / steps; const volumeStep = (bgmAudio.volume - targetVolume) / steps;
+                 bgmAudio.fadeInterval = setInterval(() => {
+                    if (bgmAudio.paused) { clearInterval(bgmAudio.fadeInterval); return; } let newVolume = bgmAudio.volume - volumeStep;
+                    if (newVolume <= targetVolume) { bgmAudio.volume = targetVolume; clearInterval(bgmAudio.fadeInterval); } else { bgmAudio.volume = newVolume; }
+                 }, stepDuration);
+            } else if (isBgmOn && scene.bgmActive && !bgmAudio.paused && bgmAudio.volume < 1) {
+                // Restore BGM volume if no longer ducking
+                fadeIn(bgmAudio, 1, bgmAudio.volume);
+            }
+        }
+        // --- Modified TTS Function ---
+        function playTTS(text, sheetNumber) { // Added sheetNumber parameter (1 or 2)
+            if (!window.speechSynthesis) { console.error('TTS not supported.'); return; }
+            if (!text || typeof text !== 'string' || text.trim() === '') { console.warn('Empty TTS text.'); return; }
+
+            // Cancel any ongoing speech *before* creating the new utterance
+            // This is crucial to prevent overlaps if called rapidly
+            if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+                 console.log("TTS: Cancelling previous speech before starting new one.");
+                 window.speechSynthesis.cancel(); // This should trigger onend/onerror of the previous utterance
+            }
+            // Reset states immediately after cancelling, just in case onend doesn't fire reliably
+            isTTSPlaying = false;
+            isSheet2TTSPlaying = false;
+            ttsUtterance = null; // Clear previous utterance refs
+            sheet2TtsUtterance = null;
+
+            // Use appropriate utterance object and state variable based on sheet number
+            let utterance = new SpeechSynthesisUtterance(text.trim());
+            if (sheetNumber === 2) { sheet2TtsUtterance = utterance; } else { ttsUtterance = utterance; }
+
+            utterance.volume = 1; utterance.rate = 1; utterance.pitch = 1;
+            const voices = window.speechSynthesis.getVoices();
+            if (voices.length > 0) {
+                 let selectedVoice = voices.find(v => v.lang.startsWith('en') && v.localService) || voices.find(v => v.lang.startsWith('en')) || voices.find(v => v.localService) || voices[0];
+                 utterance.voice = selectedVoice;
+            } else { console.warn('No TTS voices available. Using default.'); }
+
+            utterance.onstart = () => {
+                console.log(`TTS (Sheet ${sheetNumber}) started: "${text.substring(0, 30)}..."`);
+                if (sheetNumber === 2) isSheet2TTSPlaying = true; else isTTSPlaying = true;
+                manageDucking();
+            };
+            utterance.onend = () => {
+                console.log(`TTS (Sheet ${sheetNumber}) ended`);
+                if (sheetNumber === 2) { isSheet2TTSPlaying = false; sheet2TtsUtterance = null; }
+                else { isTTSPlaying = false; ttsUtterance = null; }
+                const sceneId = viewer?.getScene(); if (!sceneId) return; const scene = filteredScenes.find(s => s.id === sceneId);
+                // Restore BGM only if no *other* voice is playing
+                if (scene && isBgmOn && scene.bgmActive && bgmAudio.src && !bgmAudio.paused && !isTTSPlaying && !isSheet2TTSPlaying && vcAudio.paused && sheet2Audio.paused) {
+                     fadeIn(bgmAudio, 1, bgmAudio.volume);
+                }
+            };
+            utterance.onerror = (e) => {
+                console.error(`TTS (Sheet ${sheetNumber}) Error:`, e.error || 'Unknown', "for text:", `"${text.substring(0, 30)}..."`);
+                if (sheetNumber === 2) { isSheet2TTSPlaying = false; sheet2TtsUtterance = null; }
+                else { isTTSPlaying = false; ttsUtterance = null; }
+                const sceneId = viewer?.getScene(); if (!sceneId) return; const scene = filteredScenes.find(s => s.id === sceneId);
+                 // Restore BGM only if no *other* voice is playing
+                if (scene && isBgmOn && scene.bgmActive && bgmAudio.src && !bgmAudio.paused && !isTTSPlaying && !isSheet2TTSPlaying && vcAudio.paused && sheet2Audio.paused) {
+                     fadeIn(bgmAudio, 1, bgmAudio.volume);
+                 }
+            };
+             utterance.onpause = () => { console.log(`TTS (Sheet ${sheetNumber}) paused`); if (sheetNumber === 2) isSheet2TTSPlaying = false; else isTTSPlaying = false; };
+             utterance.onresume = () => { console.log(`TTS (Sheet ${sheetNumber}) resumed`); if (sheetNumber === 2) isSheet2TTSPlaying = true; else isTTSPlaying = true; };
+
+            console.log(`Requesting speech for TTS (Sheet ${sheetNumber}): "${text.substring(0, 30)}..."`);
+            // Use a small delay to ensure cancellation completes before speaking
+            setTimeout(() => {
+                 // Double check synth isn't busy before speaking
+                 if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+                      console.warn("Synth still busy after delay, aborting TTS speak request.");
+                      // Reset states again just in case
+                      isTTSPlaying = false;
+                      isSheet2TTSPlaying = false;
+                      if (sheetNumber === 2) sheet2TtsUtterance = null; else ttsUtterance = null;
+                      return;
+                 }
+                 window.speechSynthesis.speak(utterance);
+            }, 50); // 50ms delay
+        }
+        // --- Modified playSceneAudio ---
+        async function playSceneAudio(sceneId) {
+            const scene = filteredScenes.find(s => s.id === sceneId);
+            if (!scene) { console.error('Scene not found for ID:', sceneId); stopAllAudio(); return; }
+            console.log(`Preparing audio for scene: ${scene.name}. BGM Active Flag: ${scene.bgmActive}, VC Active Flag: ${scene.vcActive}`);
+
+            // --- Stop Sheet 2 Audio/TTS first ---
+            stopSheet2Audio();
+            hideSheet2VoiceoverCard(); // Also hide the card
+
+            // Stop/Prepare Sheet 1 VC/TTS
+            if (!vcAudio.paused && (!scene.vcActive || (vcAudio.src && scene.vcUrl && !vcAudio.src.endsWith(scene.vcUrl)))) { fadeOut(vcAudio); }
+            else if (!scene.vcActive && !vcAudio.paused) { fadeOut(vcAudio); }
+            else if (!scene.vcActive) { vcAudio.pause(); vcAudio.src = ''; }
+            if (ttsUtterance || (window.speechSynthesis.speaking && isTTSPlaying)) { window.speechSynthesis.cancel(); isTTSPlaying = false; ttsUtterance = null; } // Clear ref after cancel
+            vcAudio.currentTime = 0;
+
+            // Handle BGM
+            const currentBgmUrl = bgmAudio.src || ''; const newBgmUrl = scene.bgmUrl || ''; let bgmLoaded = false;
+            if (scene.bgmActive && newBgmUrl) {
+                if (currentBgmUrl.endsWith(newBgmUrl) && !bgmAudio.paused) { bgmLoaded = true; /* BGM already playing, check if needs unducking */ if (bgmAudio.volume < 1 && !(isVcOn && scene.vcActive && (isTTSPlaying || !vcAudio.paused)) && !isSheet2AudioPlaying && !isSheet2TTSPlaying) { fadeIn(bgmAudio, 1, bgmAudio.volume); } }
+                else { if (!bgmAudio.paused) fadeOut(bgmAudio); else bgmAudio.pause(); bgmAudio.currentTime = 0; bgmLoaded = await loadAudio(bgmAudio, newBgmUrl, 'BGM', true); }
+            } else { fadeOut(bgmAudio); bgmAudio.src = ''; bgmLoaded = false; }
+
+            // Load Sheet 1 VC/TTS
+            let vcLoaded = false;
+            if (scene.vcActive) { vcLoaded = await loadAudio(vcAudio, scene.vcUrl, 'VC', true); } else { vcAudio.src = ''; ttsUtterance = null; vcLoaded = false; }
+
+            // --- Show/Hide Sheet 1 VC Actor Visuals (Moved after audio loading) ---
+            showVcActorCardIfNeeded(scene); // Use the helper function
+
+            // Autoplay Logic
+            const playBtn = document.getElementById('playBtn');
+            if (hasInteracted && isAudioPlaying) {
+                if (bgmLoaded && isBgmOn && scene.bgmActive) { if (bgmAudio.paused) fadeIn(bgmAudio, 1); }
+                else if (!scene.bgmActive && !bgmAudio.paused) { fadeOut(bgmAudio); } // Stop BGM if scene doesn't allow it
+                if (vcLoaded && isVcOn && scene.vcActive) { if (ttsUtterance && ttsUtterance.text) { playTTS(ttsUtterance.text, 1); } else if (vcAudio.src) { if (vcAudio.paused) fadeIn(vcAudio, 1); /* Ducking handled by play event */ } }
+                else if (!scene.vcActive && (!vcAudio.paused || isTTSPlaying)) { /* Stop VC if scene doesn't allow it */ fadeOut(vcAudio); if (ttsUtterance || (window.speechSynthesis.speaking && isTTSPlaying)) { window.speechSynthesis.cancel(); isTTSPlaying = false; ttsUtterance = null; } /* Unduck BGM if needed */ if (isBgmOn && scene.bgmActive && bgmAudio.src && !bgmAudio.paused) fadeIn(bgmAudio, 1); }
+            } else { /* Master Play is OFF */ if (!isAudioPlaying && playBtn) playBtn.classList.remove('paused'); if (!isAudioPlaying) { if (!bgmAudio.paused) bgmAudio.pause(); if (!vcAudio.paused) vcAudio.pause(); if (isTTSPlaying || isSheet2TTSPlaying) window.speechSynthesis.pause(); } }
+        }
+        async function loadAudio(audioElement, urlOrText, type, isActive) {
+            if (!isActive) { if (audioElement) audioElement.src = ''; if (type === 'VC') ttsUtterance = null; if (type === 'Sheet2VO') sheet2TtsUtterance = null; return false; }
+            if (!urlOrText || typeof urlOrText !== 'string' || urlOrText.trim() === '') { if (audioElement) audioElement.src = ''; if (type === 'VC') ttsUtterance = null; if (type === 'Sheet2VO') sheet2TtsUtterance = null; return false; }
+
+            const isUrl = isValidUrl(urlOrText) || /\.(mp3|wav|ogg|m4a)$/i.test(urlOrText);
+
+            // Handle TTS
+            if ((type === 'VC' || type === 'Sheet2VO') && !isUrl) {
+                const textToSpeak = urlOrText.trim();
+                if (textToSpeak) {
+                    if (type === 'Sheet2VO') { sheet2TtsUtterance = new SpeechSynthesisUtterance(textToSpeak); if(audioElement) audioElement.src = ''; return true; }
+                    else { ttsUtterance = new SpeechSynthesisUtterance(textToSpeak); if(audioElement) audioElement.src = ''; return true; }
+                } else {
+                    if (type === 'Sheet2VO') sheet2TtsUtterance = null; else ttsUtterance = null;
+                    return false;
+                }
+            }
+            // Handle Audio URL
+            if (!audioElement) return false; const currentSrc = audioElement.src || '';
+            // If the source is the same and it's ready or playing, no need to reload
+            if (currentSrc.endsWith(urlOrText)) { if (!audioElement.paused || audioElement.readyState >= 2) return true; }
+
+            console.log(`Loading ${type} URL: ${urlOrText}`);
+            audioElement.src = urlOrText; audioElement.load(); // Set src and trigger load
+             return new Promise((resolve) => {
+                 let resolved = false; audioElement.oncanplay = null; audioElement.onerror = null; // Clear previous listeners
+                 const canPlayHandler = () => { if (resolved) return; resolved = true; clearTimeout(loadTimeout); console.log(`${type} canplay: ${urlOrText}`); resolve(true); };
+                 const errorHandler = (e) => { if (resolved) return; resolved = true; clearTimeout(loadTimeout); console.error(`${type} Load Error:`, e.message || e, 'URL:', urlOrText); audioElement.src = ''; resolve(false); };
+                 // Timeout for loading
+                 const loadTimeout = setTimeout(() => { if (resolved) return; resolved = true; audioElement.oncanplay = null; audioElement.onerror = null; console.error(`${type} load timed out: ${urlOrText}`); audioElement.src = ''; resolve(false); }, 15000); // 15 second timeout
+                 audioElement.oncanplay = canPlayHandler; audioElement.onerror = errorHandler;
+             });
+        }
+        // --- Function to play Sheet 2 Audio/TTS ---
+        async function playSheet2Audio(audioSource) {
+            console.log("Attempting to play Sheet 2 audio/TTS:", audioSource);
+            stopSheet2Audio(); // Stop any previous Sheet 2 audio first
+
+            // --- Stop Sheet 1 VC/TTS ---
+            if (!vcAudio.paused) fadeOut(vcAudio); else vcAudio.pause();
+            if (ttsUtterance || (window.speechSynthesis.speaking && isTTSPlaying)) { window.speechSynthesis.cancel(); isTTSPlaying = false; ttsUtterance = null; }
+            // --- End Stop Sheet 1 ---
+
+            const isUrl = isValidUrl(audioSource) || /\.(mp3|wav|ogg|m4a)$/i.test(audioSource);
+
+            if (isUrl) {
+                console.log("Sheet 2 Source is URL:", audioSource);
+                const loaded = await loadAudio(sheet2Audio, audioSource, 'Sheet2VO', true);
+                if (loaded && isAudioPlaying) { // Check master play state
+                    fadeIn(sheet2Audio, 1);
+                    // isSheet2AudioPlaying = true; // Set by 'play' event listener
+                    // manageDucking(); // Handled by 'play' event listener
+                } else if (loaded && !isAudioPlaying) {
+                    console.log("Sheet 2 Audio loaded but master play is off.");
+                    sheet2Audio.pause(); // Ensure paused if master is off
+                    isSheet2AudioPlaying = false;
+                } else {
+                    isSheet2AudioPlaying = false;
+                }
+            } else if (audioSource && typeof audioSource === 'string' && audioSource.trim() !== '') {
+                console.log("Sheet 2 Source is TTS Text:", audioSource);
+                // Prepare utterance immediately
+                sheet2TtsUtterance = new SpeechSynthesisUtterance(audioSource.trim());
+                if (isAudioPlaying) { // Check master play state
+                    playTTS(audioSource.trim(), 2); // Call TTS function for sheet 2
+                } else {
+                    console.log("Sheet 2 TTS ready but master play is off.");
+                    isSheet2TTSPlaying = false; // Ensure state is false
+                }
+            } else {
+                console.log("No valid Sheet 2 audio source provided.");
+                isSheet2AudioPlaying = false;
+                isSheet2TTSPlaying = false;
+            }
+        }
+        // --- Function to stop Sheet 2 Audio/TTS ---
+        function stopSheet2Audio() {
+            if (!sheet2Audio.paused) {
+                fadeOut(sheet2Audio); // Will set isSheet2AudioPlaying = false via 'pause' event
+            } else {
+                sheet2Audio.pause(); // Ensure paused
+                sheet2Audio.src = ''; // Clear src
+                isSheet2AudioPlaying = false;
+            }
+            if (sheet2TtsUtterance || (window.speechSynthesis.speaking && isSheet2TTSPlaying)) {
+                window.speechSynthesis.cancel(); // Should trigger onend/onerror
+                isSheet2TTSPlaying = false; // Reset state immediately
+                sheet2TtsUtterance = null; // Clear ref
+            }
+            // Check if BGM needs unducking
+            const sceneId = viewer?.getScene(); if (!sceneId) return; const scene = filteredScenes.find(s => s.id === sceneId);
+            // Restore BGM only if no *other* voice is playing
+            if (scene && isBgmOn && scene.bgmActive && bgmAudio.src && !bgmAudio.paused && !isTTSPlaying && !isSheet2TTSPlaying && vcAudio.paused && sheet2Audio.paused) {
+                fadeIn(bgmAudio, 1, bgmAudio.volume);
+            }
+        }
+        // --- Function to stop all audio (used on scene change errors etc.) ---
+        function stopAllAudio() {
+            console.log("Stopping all audio sources.");
+            fadeOut(bgmAudio);
+            fadeOut(vcAudio);
+            fadeOut(sheet2Audio);
+            if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+                window.speechSynthesis.cancel();
+            }
+            isAudioPlaying = false; // Set master state to false
+            isTTSPlaying = false;
+            isSheet2AudioPlaying = false;
+            isSheet2TTSPlaying = false;
+            ttsUtterance = null;
+            sheet2TtsUtterance = null;
+            const playBtn = document.getElementById('playBtn');
+            if (playBtn) playBtn.classList.remove('paused'); // Update button icon (show play)
+        }
+
+        // --- VC Actor Container Interactions (Sheet 1) ---
+        function setupVcContainerInteractions() {
+            vcActorContainerEl = document.getElementById('vcActorContainer'); // Assign element reference
+            const vcToggleArrow = document.getElementById('vcToggleArrow');
+            if (!vcActorContainerEl || !vcToggleArrow) return;
+
+            vcActorContainerEl.addEventListener('mousedown', (e) => { if (e.target === vcToggleArrow || vcToggleArrow.contains(e.target)) return; isDraggingVc = true; vcStartX = e.pageX; vcStartY = e.pageY; const rect = vcActorContainerEl.getBoundingClientRect(); vcOffsetX = window.innerWidth - rect.right; vcOffsetY = window.innerHeight - rect.bottom; document.body.style.cursor = 'grabbing'; e.preventDefault(); });
+            vcActorContainerEl.addEventListener('touchstart', (e) => { if (e.target === vcToggleArrow || vcToggleArrow.contains(e.target)) return; if (e.touches.length === 1) { isDraggingVc = true; vcStartX = e.touches[0].pageX; vcStartY = e.touches[0].pageY; const rect = vcActorContainerEl.getBoundingClientRect(); vcOffsetX = window.innerWidth - rect.right; vcOffsetY = window.innerHeight - rect.bottom; e.preventDefault(); } }, { passive: false });
+            vcToggleArrow.addEventListener('click', (e) => { e.stopPropagation(); isVcHidden = !isVcHidden; vcToggleArrow.classList.toggle('hidden', isVcHidden); vcActorContainerEl.classList.toggle('minimized', isVcHidden); });
+        }
+        // --- Hide Sheet 1 VC Actor Card ---
+        function hideVcActorCard() {
+            if (vcActorContainerEl) {
+                vcActorContainerEl.classList.remove('visible');
+                // Don't reset hasBeenDragged here, only when scene loads/changes and it's not dragged
+            }
+        }
+        // --- Helper to calculate and set default VC Card position ---
+        function recalculateAndSetVcCardPosition() {
+            if (!vcActorContainerEl) return;
+            const baseRightOffset = '20px';
+            const rightCardOffset = '320px'; // Width of the right card
+            const adjustedRightOffset = `calc(${baseRightOffset} + ${rightCardOffset})`;
+            const currentRight = isRightCardVisible ? adjustedRightOffset : baseRightOffset;
+            const bottomOffset = slideBarVisible ? '170px' : '20px';
+
+            vcActorContainerEl.style.right = currentRight;
+            vcActorContainerEl.style.bottom = bottomOffset;
+
+            // Update the stored last position *as the default*
+            vcCardLastPosition.right = currentRight;
+            vcCardLastPosition.bottom = bottomOffset;
+            vcCardLastPosition.hasBeenDragged = false; // Explicitly mark as not dragged
+            // console.log(`Recalculated VC Card Position: Right=${currentRight}, Bottom=${bottomOffset}`);
+        }
+        // --- FIX: Modified showVcActorCardIfNeeded to handle positioning and visibility ---
+        function showVcActorCardIfNeeded(scene) {
+            if (!vcActorContainerEl) return;
+
+            // FIX: Check for valid avatar URL before showing
+            const hasValidAvatar = scene && scene.vcActive && isValidAndNotEmpty(scene.vcActorAvatarUrl);
+
+            if (hasValidAvatar) {
+                const vcActorImage = document.getElementById('vcActorImage');
+                const vcToggleArrow = document.getElementById('vcToggleArrow');
+                if (vcActorImage && vcToggleArrow) {
+                    vcActorImage.src = scene.vcActorAvatarUrl;
+                    vcActorContainerEl.style.background = scene.vcActorBgColor;
+                    vcActorContainerEl.classList.add('visible'); // Make it visible
+                    vcToggleArrow.classList.toggle('hidden', isVcHidden);
+                    vcActorContainerEl.classList.toggle('minimized', isVcHidden);
+                    vcActorImage.onerror = () => { console.error(`Failed VC Avatar: ${scene.vcActorAvatarUrl}`); vcActorContainerEl.classList.remove('visible'); }
+
+                    // --- Position Adjustment Logic ---
+                    if (!vcCardLastPosition.hasBeenDragged) {
+                        // If it hasn't been dragged, calculate and set default position
+                        recalculateAndSetVcCardPosition();
+                    } else {
+                        // If it was dragged, restore its last known position
+                        vcActorContainerEl.style.right = vcCardLastPosition.right;
+                        vcActorContainerEl.style.bottom = vcCardLastPosition.bottom;
+                        // console.log(`Restoring dragged VC Card position: Right=${vcCardLastPosition.right}, Bottom=${vcCardLastPosition.bottom}`);
+                    }
+                    // --- End Position Adjustment ---
+                }
+            } else {
+                // Ensure it's hidden if conditions aren't met
+                hideVcActorCard();
+                vcCardLastPosition.hasBeenDragged = false; // Reset drag state if hidden
+            }
+        }
+
+
+        // --- Sheet 2 Voiceover Card Interactions ---
+        function setupSheet2VoiceoverInteractions() {
+            sheet2VoiceoverCardEl = document.getElementById('sheet2VoiceoverCard');
+            sheet2VoiceoverImageEl = document.getElementById('sheet2VoiceoverImage');
+            sheet2VoiceoverToggleArrowEl = document.getElementById('sheet2VoiceoverToggleArrow');
+            if (!sheet2VoiceoverCardEl || !sheet2VoiceoverImageEl || !sheet2VoiceoverToggleArrowEl) { console.error("Missing Sheet 2 Voiceover Card elements"); return; }
+
+            sheet2VoiceoverCardEl.addEventListener('mousedown', (e) => {
+                if (e.target === sheet2VoiceoverToggleArrowEl || sheet2VoiceoverToggleArrowEl.contains(e.target)) return;
+                isDraggingSheet2Vo = true; sheet2VoStartX = e.pageX; sheet2VoStartY = e.pageY;
+                const rect = sheet2VoiceoverCardEl.getBoundingClientRect();
+                sheet2VoOffsetX = window.innerWidth - rect.right;
+                // Determine if it's positioned from top or bottom
+                if (sheet2VoiceoverCardEl.style.top !== 'auto' && sheet2VoiceoverCardEl.style.top !== '') {
+                    sheet2VoOffsetY = rect.top; // Offset from top
+                    sheet2VoCardLastPosition.top = `${sheet2VoOffsetY}px`;
+                    sheet2VoCardLastPosition.bottom = 'auto';
+                } else {
+                    sheet2VoOffsetY = window.innerHeight - rect.bottom; // Offset from bottom
+                    sheet2VoCardLastPosition.bottom = `${sheet2VoOffsetY}px`;
+                    sheet2VoCardLastPosition.top = 'auto';
+                }
+                sheet2VoCardLastPosition.right = `${sheet2VoOffsetX}px`;
+                sheet2VoCardLastPosition.hasBeenDragged = true; // Mark as dragged
+
+                document.body.style.cursor = 'grabbing'; e.preventDefault();
+            });
+            sheet2VoiceoverCardEl.addEventListener('touchstart', (e) => {
+                if (e.target === sheet2VoiceoverToggleArrowEl || sheet2VoiceoverToggleArrowEl.contains(e.target)) return;
+                if (e.touches.length === 1) {
+                    isDraggingSheet2Vo = true; sheet2VoStartX = e.touches[0].pageX; sheet2VoStartY = e.touches[0].pageY;
+                    const rect = sheet2VoiceoverCardEl.getBoundingClientRect();
+                    sheet2VoOffsetX = window.innerWidth - rect.right;
+                     // Determine if it's positioned from top or bottom
+                    if (sheet2VoiceoverCardEl.style.top !== 'auto' && sheet2VoiceoverCardEl.style.top !== '') {
+                        sheet2VoOffsetY = rect.top; // Offset from top
+                        sheet2VoCardLastPosition.top = `${sheet2VoOffsetY}px`;
+                        sheet2VoCardLastPosition.bottom = 'auto';
+                    } else {
+                        sheet2VoOffsetY = window.innerHeight - rect.bottom; // Offset from bottom
+                        sheet2VoCardLastPosition.bottom = `${sheet2VoOffsetY}px`;
+                        sheet2VoCardLastPosition.top = 'auto';
+                    }
+                    sheet2VoCardLastPosition.right = `${sheet2VoOffsetX}px`;
+                    sheet2VoCardLastPosition.hasBeenDragged = true; // Mark as dragged
+                    e.preventDefault();
+                }
+            }, { passive: false });
+            sheet2VoiceoverToggleArrowEl.addEventListener('click', (e) => {
+                e.stopPropagation(); isSheet2VoHidden = !isSheet2VoHidden;
+                sheet2VoiceoverToggleArrowEl.classList.toggle('hidden', isSheet2VoHidden);
+                sheet2VoiceoverCardEl.classList.toggle('minimized', isSheet2VoHidden);
+            });
+        }
+        // --- Helper to calculate and set default Sheet2 VO Card position ---
+        function recalculateAndSetSheet2VoCardPosition(position = 'top-right') {
+             if (!sheet2VoiceoverCardEl) return;
+             const baseRightOffset = '20px';
+             const rightCardOffset = '320px'; // Width of the right card
+             const adjustedRightOffset = `calc(${baseRightOffset} + ${rightCardOffset})`;
+             const currentRight = isRightCardVisible ? adjustedRightOffset : baseRightOffset;
+             const baseBottomOffset = slideBarVisible ? '170px' : '20px'; // Adjust based on slide bar
+             const baseTopOffset = '20px';
+
+             if (position === 'bottom-right') {
+                 sheet2VoiceoverCardEl.style.top = 'auto';
+                 sheet2VoiceoverCardEl.style.bottom = baseBottomOffset;
+                 sheet2VoiceoverCardEl.style.right = currentRight;
+                 sheet2VoCardLastPosition = { right: currentRight, bottom: baseBottomOffset, top: 'auto', hasBeenDragged: false };
+             } else { // Default to top-right
+                 sheet2VoiceoverCardEl.style.bottom = 'auto';
+                 sheet2VoiceoverCardEl.style.top = baseTopOffset;
+                 sheet2VoiceoverCardEl.style.right = currentRight;
+                 sheet2VoCardLastPosition = { right: currentRight, top: baseTopOffset, bottom: 'auto', hasBeenDragged: false };
+             }
+            // console.log(`Recalculated Sheet2 VO Card Position: Right=${sheet2VoCardLastPosition.right}, Top=${sheet2VoCardLastPosition.top}, Bottom=${sheet2VoCardLastPosition.bottom}`);
+        }
+        // --- FIX: Modified showSheet2VoiceoverCard to check image URL validity ---
+        function showSheet2VoiceoverCard(imageUrl, position = 'top-right') {
+            if (!sheet2VoiceoverCardEl || !sheet2VoiceoverImageEl || !sheet2VoiceoverToggleArrowEl) {
+                console.error("Cannot show Sheet 2 VO Card: Elements not found.");
+                return;
+            }
+
+            // FIX: Check if the image URL is valid and not empty/'false'
+            const hasValidImage = isValidAndNotEmpty(imageUrl);
+
+            // Only show the card if there's a valid image URL
+            if (!hasValidImage) {
+                console.log("Hiding Sheet 2 VO Card because image URL is invalid/empty:", imageUrl);
+                hideSheet2VoiceoverCard(); // Hide the card completely
+                return; // Stop execution here
+            }
+
+            console.log(`Showing Sheet 2 VO Card. Position: ${position}, Image: ${imageUrl}`);
+
+            // Set image source (we know it's valid here)
+            sheet2VoiceoverImageEl.src = imageUrl;
+            sheet2VoiceoverImageEl.style.display = 'block';
+            sheet2VoiceoverImageEl.onerror = () => {
+                console.error("Failed Sheet 2 VO image load:", imageUrl);
+                sheet2VoiceoverImageEl.style.display = 'none';
+                // Optionally hide the card if image fails to load, though it was initially valid
+                // hideSheet2VoiceoverCard();
+            }
+
+            // Apply new position based on argument, only if not dragged
+            if (!sheet2VoCardLastPosition.hasBeenDragged) {
+                recalculateAndSetSheet2VoCardPosition(position);
+            } else {
+                 // Restore last known position if it was dragged
+                 sheet2VoiceoverCardEl.style.right = sheet2VoCardLastPosition.right;
+                 sheet2VoiceoverCardEl.style.top = sheet2VoCardLastPosition.top;
+                 sheet2VoiceoverCardEl.style.bottom = sheet2VoCardLastPosition.bottom;
+                 // console.log(`Restoring dragged Sheet2 VO Card position: Right=${sheet2VoCardLastPosition.right}, Top=${sheet2VoCardLastPosition.top}, Bottom=${sheet2VoCardLastPosition.bottom}`);
+            }
+
+            // Make visible and set toggle state
+            sheet2VoiceoverCardEl.classList.add('visible');
+            sheet2VoiceoverToggleArrowEl.classList.toggle('hidden', isSheet2VoHidden);
+            sheet2VoiceoverCardEl.classList.toggle('minimized', isSheet2VoHidden);
+        }
+        // --- Hide Sheet 2 Voiceover Card ---
+        function hideSheet2VoiceoverCard() {
+            if (!sheet2VoiceoverCardEl) return;
+            sheet2VoiceoverCardEl.classList.remove('visible');
+            // Reset drag state when hiding
+            sheet2VoCardLastPosition.hasBeenDragged = false;
+        }
+
+        // --- Welcome Screen Typing Animation ---
+        function startTypingAnimation() {
+            const descriptionText = document.getElementById('descriptionText'); if (!descriptionText || descriptionSentences.length === 0) return;
+            let sentenceIndex = 0; let charIndex = 0; let isDeleting = false; const prefix = "Brand "; descriptionText.textContent = prefix;
+            function type() {
+                if (!welcomeOverlayVisible) return; const currentSentence = descriptionSentences[sentenceIndex]; let displayText = prefix + currentSentence.substring(0, charIndex); descriptionText.textContent = displayText;
+                if (!isDeleting && charIndex < currentSentence.length) { charIndex++; setTimeout(type, typingSpeed); }
+                else if (isDeleting && charIndex > 0) { charIndex--; setTimeout(type, eraseSpeed); }
+                else if (!isDeleting && charIndex === currentSentence.length) { isDeleting = true; setTimeout(type, delayBetweenSentences); }
+                else if (isDeleting && charIndex === 0) { isDeleting = false; sentenceIndex = (sentenceIndex + 1) % descriptionSentences.length; setTimeout(type, typingSpeed / 2); }
+            }
+            setTimeout(type, typingSpeed);
+        }
+
+        // --- Hover/Docked Card Logic (Left Card - Sheet 1) ---
+        function updateCardContent(scene) {
+            const card = document.getElementById('hoverCard'); const image = document.getElementById('hoverCardImage'); const textElement = document.getElementById('hoverCardText');
+            if (!card || !image || !textElement || !scene) { console.error("Cannot update hover card content: Missing elements or scene data."); return; }
+            const trimmedUrl = scene.cardUrl ? String(scene.cardUrl).trim() : '';
+            if (isValidAndNotEmpty(trimmedUrl)) { image.src = trimmedUrl; image.style.display = 'block'; image.onerror = () => { console.error("Failed card image load:", trimmedUrl); image.style.display = 'none'; } }
+            else { image.src = ''; image.style.display = 'none'; }
+            const trimmedText = scene.floorMapDetails ? String(scene.floorMapDetails).trim() : ''; textElement.textContent = trimmedText;
+        }
+        function showHoverCard(sceneToShow, isHover = false, targetElement = null, isCategoryHover = false) {
+            const card = document.getElementById('hoverCard'); if (!card || !sceneToShow) return;
+            hideRightCard(); hideSheet2VoiceoverCard(); stopSheet2Audio(); // Hide other cards/stop audio
+
+            if (currentCard && currentCard !== card && !currentCard.classList.contains('docked-card')) { hideHoverCard(currentCard); }
+            updateCardContent(sceneToShow);
+            card.classList.remove('docked-card', 'category-hover-card', 'pinned', 'visible');
+            card.style.left = ''; card.style.top = ''; card.style.bottom = ''; card.style.transform = ''; card.style.width = ''; card.style.height = ''; card.style.opacity = ''; card.style.justifyContent = ''; card.style.position = '';
+            if (isCategoryHover) { card.classList.add('category-hover-card'); }
+
+            let top, left, bottom = 'auto', transform = 'none', width = '300px', height = '300px';
+            if (targetElement) {
+                const targetRect = targetElement.getBoundingClientRect(); const cardWidth = 300; const cardHeight = 300; const margin = 10;
+                if (isCategoryHover) { left = `${targetRect.right + margin}px`; top = 'auto'; bottom = `${window.innerHeight - targetRect.bottom}px`; }
+                else { let calcLeft = targetRect.right + margin; let calcTop = targetRect.bottom + margin; if (calcLeft + cardWidth > window.innerWidth) { calcLeft = targetRect.left - cardWidth - margin; } if (calcTop + cardHeight > window.innerHeight) { calcTop = targetRect.top - cardHeight - margin; } if (calcLeft < 0) calcLeft = margin; if (calcTop < 0) calcTop = margin; left = `${calcLeft}px`; top = `${calcTop}px`; bottom = 'auto'; }
+                width = `${cardWidth}px`; height = `${cardHeight}px`;
+            } else { console.warn("showHoverCard called without targetElement for non-docked card. Centering."); left = '50%'; top = '50%'; transform = 'translate(-50%, -50%)'; width = '400px'; height = '400px'; }
+
+            card.style.position = 'absolute'; card.style.left = left; card.style.top = top; card.style.bottom = bottom; card.style.transform = transform; card.style.width = width; card.style.height = height;
+            card.classList.add('visible'); cardWasPinnedByClick = false;
+            if (!isHover && !isCategoryHover) { card.classList.add('pinned'); cardWasPinnedByClick = true; }
+            currentCard = card; card.removeEventListener('click', stopPropagation); card.addEventListener('click', stopPropagation);
+            setupCardButtons(card, sceneToShow); card.removeEventListener('mouseenter', handleCardMouseEnter); card.removeEventListener('mouseleave', handleCardMouseLeave);
+            card.addEventListener('mouseenter', handleCardMouseEnter); card.addEventListener('mouseleave', handleCardMouseLeave);
+        }
+        function stopPropagation(e) { e.stopPropagation(); }
+        function setupCardButtons(card, scene) {
+            const closeBtn = card.querySelector('.close-btn'); const dockBtn = card.querySelector('.dock-btn'); if (!closeBtn || !dockBtn) return;
+            const newCloseBtn = closeBtn.cloneNode(true); const newDockBtn = dockBtn.cloneNode(true);
+            closeBtn.parentNode.replaceChild(newCloseBtn, closeBtn); dockBtn.parentNode.replaceChild(newDockBtn, dockBtn);
+            newCloseBtn.addEventListener('click', (e) => { e.stopPropagation(); hideHoverCard(card); });
+            newDockBtn.addEventListener('click', (e) => {
+                e.stopPropagation(); card.classList.remove('pinned', 'category-hover-card', 'visible'); card.classList.add('docked-card');
+                card.style.left = ''; card.style.top = ''; card.style.bottom = ''; card.style.transform = ''; card.style.width = ''; card.style.height = ''; card.style.opacity = ''; card.style.justifyContent = ''; card.style.position = '';
+                isLeftCardDocked = true; updateDockedElements(); document.body.classList.add('left-card-visible'); // Add body class
+            });
+        }
+        function handleCardMouseEnter() { if (hoverTimeout) clearTimeout(hoverTimeout); if (currentCard && !currentCard.classList.contains('docked-card')) { currentCard.style.opacity = '1'; if (!cardWasPinnedByClick) { currentCard.classList.add('pinned'); } } }
+        function handleCardMouseLeave() {
+            if (currentCard && !currentCard.classList.contains('docked-card')) {
+                currentCard.style.opacity = ''; if (!cardWasPinnedByClick) { currentCard.classList.remove('pinned'); }
+                hoverTimeout = setTimeout(() => { if (currentCard && !currentCard.matches(':hover') && !currentCard.classList.contains('docked-card') && !cardWasPinnedByClick) { hideHoverCard(currentCard); } }, 300);
+            }
+        }
+        function hideHoverCard(cardToHide = null) {
+            const card = cardToHide || currentCard; if (!card) return;
+            const wasDocked = card.classList.contains('docked-card');
+            card.classList.remove('visible', 'pinned', 'docked-card', 'category-hover-card');
+            if (currentCard === card) currentCard = null; if (hoverTimeout) { clearTimeout(hoverTimeout); hoverTimeout = null; } cardWasPinnedByClick = false;
+            if (wasDocked) { isLeftCardDocked = false; updateDockedElements(); document.body.classList.remove('left-card-visible'); } // Remove body class
+            const image = card.querySelector('#hoverCardImage'); const textElement = card.querySelector('#hoverCardText');
+            if (image) { image.style.display = ''; image.src = ''; image.onerror = null; } if (textElement) { textElement.textContent = ''; textElement.style.display = ''; }
+            setTimeout(() => { if (card && !card.classList.contains('visible')) { card.style.left = ''; card.style.top = ''; card.style.bottom = ''; card.style.transform = ''; card.style.width = ''; card.style.height = ''; card.style.position = ''; card.style.justifyContent = ''; card.style.opacity = ''; } }, 350);
+        }
+        function updateDockedElements() {
+            const controlBar = document.getElementById('controlBar'); const slideBar = document.getElementById('slideBar');
+            if (controlBar) controlBar.classList.toggle('docked', isLeftCardDocked);
+            if (slideBar) slideBar.classList.toggle('docked', isLeftCardDocked);
+            adjustViewerSize();
+            // console.log("updateDockedElements called. Left Docked state:", isLeftCardDocked);
+        }
+
+        // --- Hotspot Logic ---
+        function updateYellowHotspotTooltip() {
+            const yellowHotspot = document.getElementById('yellowHotspot'); const yellowTooltip = yellowHotspot?.querySelector('.hotspot-tooltip');
+            const scene = (filteredScenes && currentSceneIndex >= 0 && currentSceneIndex < filteredScenes.length) ? filteredScenes[currentSceneIndex] : null;
+            if (viewer && yellowHotspot && yellowTooltip && scene && scene.getPitchYaw === true) { const pitch = viewer.getPitch().toFixed(2); const yaw = viewer.getYaw().toFixed(2); yellowTooltip.textContent = `Pitch: ${pitch}, Yaw: ${yaw}`; yellowHotspot.style.display = 'block'; }
+            else if (yellowHotspot) { yellowHotspot.style.display = 'none'; }
+        }
+        function handleInfoHotspotClick(hotSpotDiv, args) {
+            const sceneId = args?.sceneId; const showCardFlag = args?.showCard; if (!sceneId) { console.error("Scene ID not found in hotspot args."); return; }
+            const scene = filteredScenes.find(s => s.id === sceneId);
+            if (scene && showCardFlag === true) { showHoverCard(scene, false, hotSpotDiv, false); }
+            else { if (currentCard && !currentCard.classList.contains('docked-card')) { hideHoverCard(); } }
+        }
+        function createSheet2Tooltip(hotSpotDiv, text) {
+            const span = document.createElement('span'); span.className = 'pnlm-tooltip sheet2-tooltip'; span.appendChild(document.createTextNode(text)); hotSpotDiv.appendChild(span);
+            span.style.width = span.scrollWidth - 20 + 'px'; span.style.marginLeft = -(span.scrollWidth - hotSpotDiv.offsetWidth) / 2 + 'px'; span.style.marginTop = -span.scrollHeight - 12 + 'px';
+        }
+
+        // --- Right Side Info Card Logic (Sheet 2 Hotspots) ---
+        function setupRightCardCloseButton() {
+            const closeBtn = document.getElementById('sheet2CardCloseBtn'); if (closeBtn) { closeBtn.addEventListener('click', (e) => { e.stopPropagation(); hideRightCard(); }); }
+        }
+        // --- FIX: Modified Sheet 2 Hotspot Click Handler to check sheet2VoActive flag ---
+        function handleSheet2HotspotClick(hotSpotDiv, hotspotData) {
+            console.log('Sheet 2 hotspot clicked. Data:', hotspotData);
+
+            // 1. Hide Left Card (if open and not docked)
+            if (currentCard && !currentCard.classList.contains('docked-card')) hideHoverCard();
+
+            // 2. Show Right Info Card (Always happens)
+            const card = document.getElementById('sheet2Card'); const imageEl = document.getElementById('sheet2CardImage'); const titleEl = document.getElementById('sheet2CardTitle');
+            const priceEl = document.getElementById('sheet2CardPrice'); const descriptionEl = document.getElementById('sheet2CardDescription');
+            if (!card || !imageEl || !titleEl || !priceEl || !descriptionEl || !hotspotData) { console.error("Cannot show right card: Missing elements or hotspot data."); return; }
+            imageEl.src = hotspotData.cardImageUrl || ''; imageEl.alt = hotspotData.cardTitle || 'Product Image';
+            imageEl.onerror = () => { console.error("Failed right card image load:", hotspotData.cardImageUrl); imageEl.src = 'https://placehold.co/260x200/f0f0f0/ccc?text=Image+Not+Found'; }
+            titleEl.textContent = hotspotData.cardTitle || 'No Title'; descriptionEl.textContent = hotspotData.cardDescription || 'No description available.';
+            const currencyRaw = hotspotData.cardCurrency || ''; const priceValue = hotspotData.cardPrice || ''; let priceHTML = '';
+            const isCurrencyUrl = isValidUrl(currencyRaw);
+            if (currencyRaw && isCurrencyUrl) { priceHTML = `<img src="${currencyRaw}" alt="" class="currency-symbol" onerror="this.style.display='none'; this.nextSibling.textContent = '?${priceValue}';"><span>${priceValue}</span>`; }
+            else if (currencyRaw && !isCurrencyUrl) { priceHTML = `<span>${currencyRaw}${priceValue}</span>`; } else { priceHTML = `<span>${priceValue}</span>`; }
+            priceEl.innerHTML = priceHTML;
+            showRightCard(); // Show the info card
+
+            // 3. Hide Sheet 1 VC Actor Card (if visible)
+            hideVcActorCard();
+
+            // 4. --- FIX: Check sheet2VoActive flag ---
+            if (hotspotData.sheet2VoActive === true) {
+                console.log("Sheet 2 VO is active for this hotspot (Column T is TRUE).");
+                // Show Sheet 2 Voiceover Card (if image URL is valid) & Play Audio/TTS
+                const voImageUrl = hotspotData.sheet2ImageUrl;
+                const voAudioSource = hotspotData.sheet2AudioSource;
+                showSheet2VoiceoverCard(voImageUrl, 'bottom-right'); // Show the VO card (only if image is valid)
+                playSheet2Audio(voAudioSource); // Play the associated audio/TTS (this function now stops Sheet 1 VC/TTS)
+            } else {
+                console.log("Sheet 2 VO is inactive for this hotspot (Column T is FALSE or empty).");
+                // Ensure Sheet 2 VO card is hidden and audio is stopped (already handled by scene change/stopSheet2Audio, but good to be explicit)
+                hideSheet2VoiceoverCard();
+                stopSheet2Audio();
+            }
+        }
+        // --- FIX: Modified showRightCard to correctly adjust floating card positions ---
+        function showRightCard() {
+            const card = document.getElementById('sheet2Card'); if (!card || isRightCardVisible) return;
+            console.log("Showing right card"); card.classList.add('visible'); document.body.classList.add('right-card-visible'); isRightCardVisible = true;
+            adjustViewerSize();
+            // Adjust positions of potentially overlapping elements if they are visible and NOT dragged
+            if (vcActorContainerEl && vcActorContainerEl.classList.contains('visible') && !vcCardLastPosition.hasBeenDragged) {
+                 recalculateAndSetVcCardPosition();
+            }
+            if (sheet2VoiceoverCardEl && sheet2VoiceoverCardEl.classList.contains('visible') && !sheet2VoCardLastPosition.hasBeenDragged) {
+                // Recalculate based on its current alignment (top or bottom)
+                recalculateAndSetSheet2VoCardPosition(sheet2VoCardLastPosition.top === 'auto' ? 'bottom-right' : 'top-right');
+            }
+        }
+        // --- FIX: Modified hideRightCard to correctly adjust floating card positions ---
+        function hideRightCard() {
+            const card = document.getElementById('sheet2Card'); if (!card || !isRightCardVisible) return;
+            console.log("Hiding right card"); card.classList.remove('visible'); document.body.classList.remove('right-card-visible'); isRightCardVisible = false;
+            adjustViewerSize();
+             // Reset positions of potentially overlapping elements if they are visible and NOT dragged
+            if (vcActorContainerEl && vcActorContainerEl.classList.contains('visible') && !vcCardLastPosition.hasBeenDragged) {
+                 recalculateAndSetVcCardPosition();
+            }
+            if (sheet2VoiceoverCardEl && sheet2VoiceoverCardEl.classList.contains('visible') && !sheet2VoCardLastPosition.hasBeenDragged) {
+                 // Recalculate based on its current alignment (top or bottom)
+                 recalculateAndSetSheet2VoCardPosition(sheet2VoCardLastPosition.top === 'auto' ? 'bottom-right' : 'top-right');
+            }
+        }
+
+        // --- Initial Setup on DOM Ready ---
+        document.addEventListener('DOMContentLoaded', () => {
+            // Get references to elements
+            vcActorContainerEl = document.getElementById('vcActorContainer'); // Sheet 1 VC
+            sheet2VoiceoverCardEl = document.getElementById('sheet2VoiceoverCard');
+            sheet2VoiceoverImageEl = document.getElementById('sheet2VoiceoverImage');
+            sheet2VoiceoverToggleArrowEl = document.getElementById('sheet2VoiceoverToggleArrow');
+
+            window.addEventListener('resize', adjustViewerSize);
+            const handleFullscreenChange = () => { const btn = document.getElementById('fullscreenBtn'); const isFull = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement); if (btn) btn.classList.toggle('active', isFull); adjustViewerSize(); };
+            document.addEventListener('fullscreenchange', handleFullscreenChange); document.addEventListener('webkitfullscreenchange', handleFullscreenChange); document.addEventListener('mozfullscreenchange', handleFullscreenChange); document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+
+            loadTourData();
+        });
+
+    </script>
+</body>
+</html>

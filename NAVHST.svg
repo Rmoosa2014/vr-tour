@@ -1,14 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg id="Layer_2" data-name="Layer 2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 246.64 246.64">
+<svg id="Layer_2" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 246.6 246.6">
+  <!-- Generator: Adobe Illustrator 29.6.1, SVG Export Plug-In . SVG Version: 2.1.1 Build 9)  -->
   <defs>
     <style>
-      .cls-1 {
-        fill: #231f20;
+      .st0 {
+        fill: #fff;
       }
     </style>
   </defs>
-  <g id="Layer_1-2" data-name="Layer 1">
-    <path class="cls-1" d="M123.32,246.64C55.32,246.64,0,191.32,0,123.32S55.32,0,123.32,0s123.32,55.32,123.32,123.32-55.32,123.32-123.32,123.32ZM123.32,15C63.59,15,15,63.59,15,123.32s48.59,108.32,108.32,108.32,108.32-48.59,108.32-108.32S183.05,15,123.32,15Z"/>
-    <circle class="cls-1" cx="123.32" cy="123.32" r="75.6"/>
+  <g id="Layer_1-2">
+    <path class="st0" d="M123.3,246.6C55.3,246.6,0,191.3,0,123.3S55.3,0,123.3,0s123.3,55.3,123.3,123.3-55.3,123.3-123.3,123.3ZM123.3,15C63.6,15,15,63.6,15,123.3s48.6,108.3,108.3,108.3,108.3-48.6,108.3-108.3S183.1,15,123.3,15Z"/>
+    <circle class="st0" cx="123.3" cy="123.3" r="75.6"/>
   </g>
 </svg>

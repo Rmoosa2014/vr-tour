@@ -1,0 +1,24 @@
+{
+  "settings": {
+    "logoUrl": "https://raw.githubusercontent.com/Rmoosa2014/vr-tour/main/ILLUS-LOGO.svg"
+  },
+  "welcome_slide": {
+    "description": [
+      "Premium quality",
+      "High CRI",
+      "Wide variety of lumen options",
+      "Flicker-Free performance."
+    ],
+    "title": "Welcome to ILLUS 360° Virtual tour",
+    "audioUrl": "https://raw.githubusercontent.com/Rmoosa2014/vr-tour/main/WelcomeVC.mp3"
+  },
+  "scenes": [
+    {
+      "id": "scene-1",
+      "name": "Enterance Door",
+      "imageUrl": "https://raw.githubusercontent.com/Rmoosa2014/vr-tour/main/IMG0058.jpg",
+      "thumbnailUrl": "https://raw.githubusercontent.com/Rmoosa2014/vr-tour/main/IMG0058.jpg",
+      "hotspots": []
+    }
+  ]
+}

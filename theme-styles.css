@@ -90,10 +90,6 @@
     border-color: #7289da; /* A nice highlight color for focus */
 }
 
-.half-width {
-    width: 50%;
-}
-
 .description-row {
     display: flex;
     align-items: center;

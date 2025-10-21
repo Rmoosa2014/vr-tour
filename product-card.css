@@ -1,0 +1,139 @@
+/* -----------------------------------------------------------
+ * PRODUCT CARD STYLES (product-card.css)
+ * * Instructions:
+ * 1. Link this file in the <head> of your HTML project.
+ * 2. Ensure you also link the Inter font and Tailwind CSS CDN.
+ * 3. Change variables inside :root {} to easily customize the card globally.
+ * -----------------------------------------------------------
+ */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+
+/* * CSS VARIABLES FOR REUSABILITY
+ * Override these variables in your main project's CSS file to change 
+ * the card's appearance globally.
+ */
+:root {
+    /* Main Container Dimensions */
+    --main-width: 300px;
+    --main-height: 410px;
+    
+    /* Box Dimensions and Radius */
+    --top-box-height: 350px;
+    --bottom-box-height: 50px;
+    --box-radius: 27.5px; 
+    
+    /* Colors */
+    --box-color: #ffffff; /* White boxes */
+    --text-color-dark: #333333; 
+    --text-color-light: #666666; 
+    --price-color: #1E40AF; 
+    --container-bg: transparent; 
+}
+
+/* Base Body Styling (Optional, adjust for your project's main layout) */
+body {
+    font-family: 'Inter', sans-serif;
+    /* This background color is for testing only. Remove in production. */
+    background-color: #555555; 
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    margin: 0;
+}
+
+/* Card Container (Transparent) */
+.main-container {
+    width: var(--main-width);
+    height: var(--main-height);
+    background-color: var(--container-bg);
+    box-shadow: none; 
+    display: flex; 
+    flex-direction: column; 
+    justify-content: space-between; 
+    gap: 10px; /* 10px gap between top and bottom box */
+}
+
+/* Base Box Styling: Applies background and corner radius to both child boxes */
+.box-base {
+    width: var(--main-width);
+    background-color: var(--box-color);
+    border-radius: var(--box-radius);
+    box-sizing: border-box; 
+}
+
+/* Top Image Box Specific Styles */
+.top-box {
+    height: var(--top-box-height);
+    overflow: hidden; 
+    padding: 0; 
+}
+
+/* Image inside the Top Box (Must cover and respect parent radius) */
+.top-box img {
+    width: 100%;
+    height: 100%; 
+    object-fit: cover; 
+    border-radius: var(--box-radius);
+}
+
+/* Bottom Info Box Specific Styles */
+.bottom-box {
+    height: var(--bottom-box-height);
+    padding: 0 15px;
+    display: flex;
+    justify-content: space-between; /* Info left, Price/Colors right */
+    align-items: center;
+}
+
+/* Left-aligned Info (Name and Description) */
+.product-info {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.1; 
+}
+
+.product-name {
+    font-size: 1.1em; 
+    font-weight: 600;
+    color: var(--text-color-dark);
+}
+
+.product-description {
+    font-size: 0.8em;
+    font-weight: 400;
+    color: var(--text-color-light);
+}
+
+/* Right-aligned Price and Colors */
+.price-and-colors {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    justify-content: center;
+}
+
+.product-price {
+    font-size: 1.1em;
+    font-weight: 600;
+    color: var(--price-color);
+    margin-bottom: 3px; 
+}
+
+.color-swatches {
+    display: flex;
+    gap: 4px; 
+}
+
+.color-swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 1px solid rgba(0,0,0,0.1); 
+}
+
+/* Specific color swatch backgrounds */
+.color-swatch.yellow { background-color: #FACC15; }
+.color-swatch.blue { background-color: #1E40AF; }
+.color-swatch.red { background-color: #DC2626; }
+.color-swatch.black { background-color: #000000; }

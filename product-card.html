@@ -1,0 +1,31 @@
+<!-- 
+    Product Card Component Structure
+    
+    INSTRUCTIONS FOR USE:
+    1. Ensure 'product-card.css' is linked in your project's <head>.
+    2. Copy and paste this entire 'div.main-container' block into your <body>.
+    3. Update the 'img src' and the text content (Name, Price, etc.) as needed.
+-->
+<div class="main-container">
+    
+    <!-- Top Box: Full image cover with rounded corners -->
+    <div class="box-base top-box">
+        <img src="https://placehold.co/300x350/E0E0E0/A0A0A0?text=Your+Product+Image" alt="Product Image">
+    </div>
+
+    <!-- Bottom Box: Info left, Price/Colors right with rounded corners -->
+    <div class="box-base bottom-box">
+        <div class="product-info">
+            <span class="product-name">Product Name Here</span>
+            <span class="product-description">Short description</span>
+        </div>
+        <div class="price-and-colors">
+            <span class="product-price">$ 89.00</span>
+            <div class="color-swatches">
+                <!-- Add or remove color-swatches classes (yellow, blue, red, black) as needed -->
+                <div class="color-swatch yellow"></div>
+                <div class="color-swatch blue"></div>
+            </div>
+        </div>
+    </div>
+</div>

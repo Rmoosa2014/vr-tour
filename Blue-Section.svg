@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Layer_2" data-name="Layer 2" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1920 1137.54">
+  <defs>
+    <style>
+      .cls-1 {
+        fill: url(#radial-gradient);
+        opacity: .34;
+      }
+
+      .cls-2 {
+        fill: #446cde;
+      }
+    </style>
+    <radialGradient id="radial-gradient" cx="719.01" cy="-2003.88" fx="719.01" fy="-2003.88" r="719.01" gradientTransform="translate(0 2002.25) scale(1 .67)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#63cdf6"/>
+      <stop offset=".12" stop-color="#62cbf5" stop-opacity=".98"/>
+      <stop offset=".25" stop-color="#60c6f4" stop-opacity=".93"/>
+      <stop offset=".38" stop-color="#5ebef2" stop-opacity=".85"/>
+      <stop offset=".51" stop-color="#5ab2ef" stop-opacity=".73"/>
+      <stop offset=".64" stop-color="#55a4eb" stop-opacity=".58"/>
+      <stop offset=".77" stop-color="#5092e7" stop-opacity=".39"/>
+      <stop offset=".9" stop-color="#497de2" stop-opacity=".18"/>
+      <stop offset="1" stop-color="#446cde" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <g id="A4_Storyboard_Template_-_12-Panel_-_Landscape_-_StudioBinder" data-name="A4 Storyboard Template - 12-Panel - Landscape - StudioBinder">
+    <path class="cls-2" d="M248.8,127.27c4.55-9.47,7.34-21.71,3.78-39.32-4.36-21.59-36.57-58.61-71.52-73.86C144.2-2.01,85.35-8.57,48.11,17.79c-17.74,12.55-23.98,28.16-25.66,41.07l226.36,68.41Z"/>
+    <path class="cls-2" d="M1920,224.29v895.89s-153.56-47.89-1026.85,0C180.91,1159.24,0,1120.18,0,1120.18V38.69s107.11,54.76,591.25,127.26c484.13,72.5,1328.75,58.34,1328.75,58.34Z"/>
+    <path class="cls-2" d="M1920,69.12v155.95h-120.86c-12.08-19.65-37.15-69.39-26.75-109.1,11.12-42.46,48.52-61.94,73.5-64.43,19.11-1.9,46.55-.27,74.11,17.58Z"/>
+    <path class="cls-2" d="M1920,335.4L0,259.74V37.51s587.03,47.95,935.33,62.33c348.3,14.38,984.67,13.33,984.67,13.33v222.22Z"/>
+    <ellipse class="cls-1" cx="719.01" cy="653.66" rx="719.01" ry="483.88"/>
+  </g>
+</svg>
